@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Hybrid MPI + OpenMP Fortran Debugging Tutorial & Example (`docs/Tutorial-Fortran-OpenMP.md`, `examples/fortran_openmp/stencil_omp.f90`, `examples/fortran_openmp/Makefile`)**:
+  - Added a runnable 2D `4 x 6` column-major Fortran MPI + OpenMP stencil example (`gfortran` / `ifx`) with coordinate-encoded state (`rank * 1000 + j * 100 + i`) and a complete tutorial covering multi-rank + OpenMP thread navigation, `set scheduler-locking on/off`, 1-based Fortran slices, and column-major `ArrayPlotDialog` inspection.
 - **Fortran (`gfortran` / `ifx`) Frame Detection, 1-Based Slicing & Column-Major Inspection (`LanguageExpressionHelper`, `GdbRankCoordinator`, `GdbMiParser`, `GdbRankInspection`, `ArrayPlotDialog`, `ArrayPlotCanvas`, `TensorSliceTableModel`, `PluginHostBridge`)**:
   - Added per-rank `SourceLanguage` tracking (`Unknown`, `C`, `Cpp`, `Fortran`) resolved from GDB/MI `-gdb-show language` and frame filename extensions (`.f`, `.for`, `.f90`, `.f95`, `.f03`, `.f08`, `.F90`), automatically refreshed on stops/frame switches and cleared on resume.
   - Added `LanguageExpressionHelper.hpp` for Fortran 1-based inclusive slice formatting (`vec(1:16)`, `mat(2:5, 1:4)`), Fortran base-address evaluation (`&(arr)` without C `[0]` subscripting), GDB Fortran array type/bounds parsing (`real(kind=8) (10,20)`, `integer(kind=4) (0:9,1:5)`), generalized N-D column-major vs. row-major indexing, and contiguous-range resolution in `PluginHostBridge`.
