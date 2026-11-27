@@ -93,7 +93,13 @@ void LocalSlurmBackend::setPollIntervalMs(int intervalMs) {
 }
 
 void LocalSlurmBackend::setBasePort(int basePort) {
-  m_basePort = (basePort > 0 && basePort < 65000) ? basePort : 2345;
+  m_basePort = qBound(1024, basePort, 65000);
+  m_basePortOverridden = true;
+}
+
+int LocalSlurmBackend::basePort() const {
+  if (m_basePortOverridden) return m_basePort;
+  return qBound(1024, ConfigManager::instance().getHpcSettings().baseGdbserverPort, 65000);
 }
 
 void LocalSlurmBackend::setStagingDirectory(const QString& dirPath) {
@@ -239,7 +245,7 @@ QString LocalSlurmBackend::buildStagedBatchScript(const QString& rawScript,
   const QString envPrelude = QStringLiteral(
       "export GRIDLOCK_GDBSERVER_BASE_PORT=%1\n"
       "if [ -n \"${SLURM_JOB_ID:-}\" ] && [ -n \"${SLURM_NODELIST:-}\" ]; then printf '%s\\n' \"$SLURM_NODELIST\" > \"%2\"; fi")
-                                 .arg(m_basePort)
+                                 .arg(basePort())
                                  .arg(nodelistMarkerFile);
   lines.insert(lastHeaderIdx + 1, envPrelude);
 
@@ -335,10 +341,10 @@ void LocalSlurmBackend::submitDebugJob(const QString& scriptTemplate,
     }
     const QByteArray wrapBody =
         "#!/bin/sh\n"
-        "RANK=\"${SLURM_PROCID:-${PMI_RANK:-${OMPI_COMM_WORLD_RANK:-${MV2_COMM_WORLD_RANK:-0}}}}\"\n"
+        "RANK=\"${OMPI_COMM_WORLD_RANK:-${PMIX_RANK:-${PMI_RANK:-${MV2_COMM_WORLD_RANK:-${SLURM_PROCID:-0}}}}}\"\n"
         "BASE_PORT=\"${GRIDLOCK_GDBSERVER_BASE_PORT:-2345}\"\n"
         "PORT=$((BASE_PORT + RANK))\n"
-        "exec gdbserver --multi \":${PORT}\" \"$@\"\n";
+        "exec gdbserver --multi \"0.0.0.0:${PORT}\" \"$@\"\n";
     wf.write(wrapBody);
     wf.close();
     QFile::setPermissions(m_lastWrapperScriptPath,
@@ -530,7 +536,10 @@ void LocalSlurmBackend::resolveRunningJobNodes(int jobId) {
             proc->deleteLater();
             if (m_activeJobId != jobId) return;
             const QString upper = nodelist.toUpper();
-            if (isRunningSlurmState(upper) || isPendingSlurmState(upper)) nodelist.clear();
+            if (isRunningSlurmState(upper) || isPendingSlurmState(upper) ||
+                nodelist.contains(QRegularExpression(QStringLiteral("\\s")))) {
+              nodelist.clear();
+            }
             runScontrolShowHostnames(jobId, nodelist);
           });
   proc->start(squeueExe, {QStringLiteral("-j"), QString::number(jobId),
@@ -611,7 +620,8 @@ void LocalSlurmBackend::finalizeAttachTargets(int jobId, const QStringList& host
     return;
   }
 
-  m_resolvedComputeEndpoints = buildComputeRankEndpoints(hostnames, m_expectedRanks, m_basePort);
+  const int effBasePort = basePort();
+  m_resolvedComputeEndpoints = buildComputeRankEndpoints(hostnames, m_expectedRanks, effBasePort);
   const auto ssh = ConfigManager::instance().getSshSettings();
   const QString gdbPath = ConfigManager::instance().getGdbPath().trimmed().isEmpty()
                               ? QStringLiteral("gdb")
@@ -636,7 +646,7 @@ void LocalSlurmBackend::finalizeAttachTargets(int jobId, const QStringList& host
       sshArgs << QStringLiteral("-i") << kp;
     }
     for (int r = 0; r < m_resolvedComputeEndpoints.size(); ++r) {
-      const int localPort = m_basePort + r;
+      const int localPort = effBasePort + r;
       sshArgs << QStringLiteral("-L")
               << QStringLiteral("127.0.0.1:%1:%2").arg(localPort).arg(m_resolvedComputeEndpoints[r]);
     }
@@ -662,7 +672,7 @@ void LocalSlurmBackend::finalizeAttachTargets(int jobId, const QStringList& host
   specs.reserve(m_resolvedComputeEndpoints.size());
   for (int r = 0; r < m_resolvedComputeEndpoints.size(); ++r) {
     gridlock::RemoteTargetSpec spec;
-    spec.endpoint = useSshForwards ? QStringLiteral("127.0.0.1:%1").arg(m_basePort + r)
+    spec.endpoint = useSshForwards ? QStringLiteral("127.0.0.1:%1").arg(effBasePort + r)
                                    : m_resolvedComputeEndpoints[r];
     spec.localSymbolBinary = m_activeTargetBinary;
     spec.gdbBinary = gdbPath;

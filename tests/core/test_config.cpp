@@ -557,6 +557,17 @@ void TestConfig::testLocalSlurmBackendPipeline() {
 
     gridlock::core::LocalSlurmBackend backend;
     backend.setPollIntervalMs(20);
+    auto hpcPortTest = cfg.getHpcSettings();
+    hpcPortTest.baseGdbserverPort = 4120;
+    hpcPortTest.attachRetryTimeoutSec = 22;
+    cfg.saveHpcSettings(hpcPortTest);
+    QCOMPARE(cfg.getHpcSettings().baseGdbserverPort, 4120);
+    QCOMPARE(cfg.getHpcSettings().attachRetryTimeoutSec, 22);
+    QCOMPARE(backend.basePort(), 4120);
+    hpcPortTest.baseGdbserverPort = 2345;
+    hpcPortTest.attachRetryTimeoutSec = 15;
+    cfg.saveHpcSettings(hpcPortTest);
+    QCOMPARE(backend.basePort(), 2345);
     QSignalSpy failSpy(&backend, &gridlock::core::LocalSlurmBackend::jobFailed);
     backend.submitDebugJob(QStringLiteral("#!/bin/bash\n#SBATCH --nodes=2\n#SBATCH --ntasks-per-node=2\nsrun \"{FILE}\"\n"),
                            fakeTarget, QString(), workDir);

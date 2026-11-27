@@ -425,18 +425,40 @@ void TestMainWindowUI::testSlurmFileMenuOptInToggle() {
         prevWasSep = a->isSeparator();
     }
 
-    // Open Preferences -> HPC / Cluster and verify unchecked default + bold red warning label.
+    // Open Preferences -> HPC / Cluster and verify unchecked default, tight warning placement, port/timeout persistence, and shortcut button.
     gridlock::ui::PreferencesDialog prefs(&mw);
+    prefs.resize(1080, 680);
+    prefs.show();
+    if (auto* tree = prefs.categoryTree()) {
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            if (auto* item = tree->topLevelItem(i); item && item->data(0, Qt::UserRole).toInt() == 5) {
+                tree->setCurrentItem(item);
+                break;
+            }
+        }
+    }
+    QApplication::processEvents();
     auto* slurmCheck = prefs.findChild<QCheckBox*>(QStringLiteral("enableSlurmMenuCheck"));
     auto* warnLbl = prefs.findChild<QLabel*>(QStringLiteral("slurmExperimentalWarningLabel"));
+    auto* portSpin = prefs.findChild<QSpinBox*>(QStringLiteral("baseGdbserverPortSpin"));
+    auto* retrySpin = prefs.findChild<QSpinBox*>(QStringLiteral("attachRetryTimeoutSpin"));
+    auto* configSlurmBtn = prefs.findChild<QPushButton*>(QStringLiteral("configureSlurmIntegrationButton"));
     QVERIFY2(slurmCheck != nullptr && !slurmCheck->isChecked() && slurmCheck->text().contains(QStringLiteral("Submit Slurm Job...")),
              "HPC / Cluster settings must expose unchecked opt-in checkbox for Submit Slurm Job...");
     QVERIFY2(warnLbl != nullptr && warnLbl->text() == QStringLiteral("Experimental, untested, not responsible for breakage") &&
              warnLbl->styleSheet().contains(QStringLiteral("#ff4d4f")) && warnLbl->styleSheet().contains(QStringLiteral("bold")),
              "HPC / Cluster settings must display bold red experimental warning");
+    const int warnGapPx = warnLbl->geometry().top() - slurmCheck->geometry().bottom();
+    QVERIFY2(warnGapPx >= 0 && warnGapPx <= 12,
+             qPrintable(QStringLiteral("Warning label must sit directly below checkbox (gap=%1px > 12px)").arg(warnGapPx)));
+    QVERIFY2(portSpin != nullptr && portSpin->value() == 2345 && retrySpin != nullptr && retrySpin->value() == 15,
+             "HPC / Cluster settings must expose Base GDBServer Port (2345) and Attach Retry Timeout (15s)");
+    QVERIFY(configSlurmBtn != nullptr);
 
-    // Check the opt-in toggle and Apply: File menu action becomes visible live.
+    // Check the opt-in toggle, adjust port/timeout, and Apply: verify live menu visibility and LocalSlurmBackend propagation.
     slurmCheck->setChecked(true);
+    portSpin->setValue(3456);
+    retrySpin->setValue(25);
     auto* btnBox = prefs.findChild<QDialogButtonBox*>();
     QVERIFY(btnBox != nullptr);
     QPushButton* applyBtn = btnBox->button(QDialogButtonBox::Apply);
@@ -444,6 +466,16 @@ void TestMainWindowUI::testSlurmFileMenuOptInToggle() {
     QVERIFY(applyBtn && okBtn);
     applyBtn->click(); QApplication::processEvents();
     QVERIFY2(cfg.getHpcSettings().enableSlurmMenu && slurmAct->isVisible(), "Applying opt-in checkbox must show Submit Slurm Job... in File menu");
+    QCOMPARE(cfg.getHpcSettings().baseGdbserverPort, 3456);
+    QCOMPARE(cfg.getHpcSettings().attachRetryTimeoutSec, 25);
+    auto* slurmBackend = dynamic_cast<gridlock::core::LocalSlurmBackend*>(mw.hpcBackend());
+    QVERIFY(slurmBackend != nullptr);
+    QCOMPARE(slurmBackend->basePort(), 3456);
+
+    // Verify Configure Slurm Script & Paths... switches the sidebar directly to HPC Integration (page 6).
+    configSlurmBtn->click(); QApplication::processEvents();
+    QVERIFY(prefs.categoryTree() && prefs.categoryTree()->currentItem() &&
+            prefs.categoryTree()->currentItem()->data(0, Qt::UserRole).toInt() == 6);
 
     // Uncheck and click OK: File menu action hides again live.
     slurmCheck->setChecked(false);
@@ -641,7 +673,8 @@ void TestMainWindowUI::testSlurmParserPersistenceAndLocalBackendWorkflow() {
     slurmBackend->setPollIntervalMs(20);
 
     // Open the .cpp source file so m_currentFile is a .cpp file, while loading the compiled binary target.
-    mw.loadBinaryTarget(binFile);
+    QVERIFY(mw.loadBinaryTarget(binFile));
+    QCOMPARE(mw.activeTargetBinaryPath(), QFileInfo(binFile).absoluteFilePath());
     mw.loadSourceFile(cppFile);
     QVERIFY(mw.onSubmitSlurmJob());
 

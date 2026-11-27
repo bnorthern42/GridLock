@@ -196,6 +196,15 @@ void PreferencesDialog::setupPages() {
     m_editingPage = new EditingSettingsPage(m_stack); m_behaviorPage = new BehaviorSettingsPage(m_stack);
     m_keybindingsPage = new KeybindingsSettingsPage(m_stack); m_debuggerPage = new DebuggerSettingsPage(m_stack);
     m_hpcPage = new HpcSettingsPage(m_stack); m_hpcIntegrationPage = new HpcIntegrationSettingsPage(m_stack);
+    connect(m_hpcPage, &HpcSettingsPage::openHpcIntegrationRequested, this, [this]() {
+        if (!m_categoryTree) return;
+        for (int i = 0; i < m_categoryTree->topLevelItemCount(); ++i) {
+            if (auto* item = m_categoryTree->topLevelItem(i); item && item->data(0, Qt::UserRole).toInt() == 6) {
+                m_categoryTree->setCurrentItem(item);
+                break;
+            }
+        }
+    });
     m_terminalPage = new TerminalSettingsPage(m_stack); m_docsetPage = new DocsetSettingsPage(m_stack);
     m_toolbarPage = createToolbarSettingsPage(m_stack); m_pluginPage = new PluginSettingsPage(hostPlugMgr, m_stack);
 
@@ -277,7 +286,9 @@ void PreferencesDialog::apply() {
     ps.customGdbPath = m_debuggerPage->gdbPath().toStdString();
     cfg.saveProjectSettings(ps);
 
-    cfg.saveHpcSettings({m_hpcPage->hostsFile(), m_hpcPage->envVars(), m_hpcPage->strictAffinity(), m_hpcPage->enableSlurmMenu()});
+    cfg.saveHpcSettings({m_hpcPage->hostsFile(), m_hpcPage->envVars(), m_hpcPage->strictAffinity(),
+                         m_hpcPage->enableSlurmMenu(), m_hpcPage->baseGdbserverPort(),
+                         m_hpcPage->attachRetryTimeoutSec()});
     cfg.saveSshSettings({m_hpcIntegrationPage->sshHost(), m_hpcIntegrationPage->sshUser(), m_hpcIntegrationPage->sshKeyPath()});
     cfg.saveSlurmSettings(m_hpcIntegrationPage->toSlurmSettings());
 

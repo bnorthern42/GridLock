@@ -84,16 +84,20 @@ HpcSettings ConfigManager::getHpcSettings() const {
   hs.envVars = s.value("hpc/env_vars", "").toString();
   hs.strictAffinity = s.value("hpc/strict_affinity", false).toBool();
   hs.enableSlurmMenu = s.value("hpc/enable_slurm_menu", false).toBool();
+  hs.baseGdbserverPort = qBound(1024, s.value("hpc/base_gdbserver_port", 2345).toInt(), 65000);
+  hs.attachRetryTimeoutSec = qBound(2, s.value("hpc/attach_retry_timeout_sec", 15).toInt(), 120);
   return hs;
 }
 
-/** @brief Persists HPC cluster hostfile, environment, and affinity settings. */
+/** @brief Persists HPC cluster hostfile, environment, affinity, and remote attach settings. */
 void ConfigManager::saveHpcSettings(const HpcSettings& hs) {
   QSettings s(kOrg, kApp);
   s.setValue("hpc/hosts_file", hs.hostsFile);
   s.setValue("hpc/env_vars", hs.envVars);
   s.setValue("hpc/strict_affinity", hs.strictAffinity);
   s.setValue("hpc/enable_slurm_menu", hs.enableSlurmMenu);
+  s.setValue("hpc/base_gdbserver_port", qBound(1024, hs.baseGdbserverPort, 65000));
+  s.setValue("hpc/attach_retry_timeout_sec", qBound(2, hs.attachRetryTimeoutSec, 120));
   s.sync();
   auto it = m_slurmMenuVisibilityListeners.begin();
   while (it != m_slurmMenuVisibilityListeners.end()) {

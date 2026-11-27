@@ -32,16 +32,65 @@ using prefs_detail::setComboTextValue;
  */
 HpcSettingsPage::HpcSettingsPage(QWidget* parent)
     : QWidget(parent) {
-    auto* form = createStandardPageForm(this, tr("<b>HPC / Cluster</b>"));
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(20, 16, 20, 20);
+    root->setSpacing(14);
 
-    // Hostfile browse input layout with non-clipped 92px minimum Browse button width.
+    auto* pageHeading = new QLabel(tr("<b>HPC / Cluster</b>"), this);
+    pageHeading->setObjectName(QStringLiteral("heading"));
+    root->addWidget(pageHeading);
+
+    auto* pageSep = new QLabel(this);
+    pageSep->setFixedHeight(1);
+    pageSep->setObjectName(QStringLiteral("separator"));
+    root->addWidget(pageSep);
+
+    auto makeSection = [&](const QString& title, const QString& subtitle) -> QFormLayout* {
+        auto* card = new QWidget(this);
+        card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        auto* cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(0, 4, 0, 4);
+        cardLayout->setSpacing(6);
+
+        auto* titleLbl = new QLabel(QStringLiteral("<b>%1</b>").arg(title), card);
+        titleLbl->setObjectName(QStringLiteral("heading"));
+        cardLayout->addWidget(titleLbl);
+
+        auto* subLbl = new QLabel(QStringLiteral("<small style='color:#888;'>%1</small>").arg(subtitle), card);
+        subLbl->setWordWrap(true);
+        cardLayout->addWidget(subLbl);
+
+        auto* form = new QFormLayout();
+        form->setContentsMargins(0, 6, 0, 0);
+        form->setSpacing(10);
+        form->setLabelAlignment(Qt::AlignRight | Qt::AlignTop);
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        cardLayout->addLayout(form);
+
+        root->addWidget(card);
+        return form;
+    };
+
+    // Section 1: MPI Runtime & Rank Placement.
+    auto* mpiForm = makeSection(
+        tr("MPI Runtime &amp; Rank Placement"),
+        tr("Configure optional MPI hostfiles, per-rank environment variables, and node affinity pinning."));
+
+    auto* hostsContainer = new QWidget(this);
+    hostsContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto* hostsCol = new QVBoxLayout(hostsContainer);
+    hostsCol->setContentsMargins(0, 0, 0, 0);
+    hostsCol->setSpacing(3);
+
     auto* hostsRow = new QHBoxLayout();
-    m_hostsFileEdit = new QLineEdit(this);
+    hostsRow->setContentsMargins(0, 0, 0, 0);
+    hostsRow->setSpacing(6);
+    m_hostsFileEdit = new QLineEdit(hostsContainer);
     m_hostsFileEdit->setPlaceholderText(tr("(not set - use default hosts)"));
     m_hostsFileEdit->setToolTip(
         tr("Path to an MPI hostfile. When set, --hostfile <path> is passed to the\n"
            "MPI launcher. Leave empty to let the launcher choose nodes automatically."));
-    auto* browseBtn = new QPushButton(tr("Browse…"), this);
+    auto* browseBtn = new QPushButton(tr("Browse…"), hostsContainer);
     browseBtn->setMinimumWidth(92);
     connect(browseBtn, &QPushButton::clicked, this, [this]() {
         const QString path = QFileDialog::getOpenFileName(
@@ -50,45 +99,95 @@ HpcSettingsPage::HpcSettingsPage(QWidget* parent)
             tr("All Files (*)"), nullptr, QFileDialog::DontUseNativeDialog);
         if (!path.isEmpty()) m_hostsFileEdit->setText(path);
     });
-    hostsRow->addWidget(m_hostsFileEdit);
+    hostsRow->addWidget(m_hostsFileEdit, 1);
     hostsRow->addWidget(browseBtn);
-    form->addRow(tr("MPI Hosts File:"), hostsRow);
+    hostsCol->addLayout(hostsRow);
 
-    // Multi-line environment variable key-value definitions for MPI rank processes.
-    m_envVarsEdit = new QTextEdit(this);
-    m_envVarsEdit->setFixedHeight(90);
+    auto* hostsHint = new QLabel(
+        tr("<small style='color:#888;'>Optional hostfile override passed to mpirun via --hostfile.</small>"),
+        hostsContainer);
+    hostsHint->setWordWrap(true);
+    hostsCol->addWidget(hostsHint);
+    mpiForm->addRow(tr("MPI Hosts File:"), hostsContainer);
+
+    m_envVarsEdit = new QPlainTextEdit(this);
+    m_envVarsEdit->setFixedHeight(88);
     m_envVarsEdit->setPlaceholderText(
         tr("One key=value pair per line\ne.g.  OMPI_MCA_btl=tcp,self\n      UCX_NET_DEVICES=eth0"));
     m_envVarsEdit->setToolTip(
-        tr("MPI environment variables injected via -x KEY=VALUE flags.\nOne entry per line: KEY=VALUE"));
-    m_envVarsEdit->setAcceptRichText(false);
-    form->addRow(tr("MPI Env Vars:"), m_envVarsEdit);
+        tr("MPI environment variables injected into launched rank processes.\nOne entry per line: KEY=VALUE"));
+    mpiForm->addRow(tr("MPI Env Vars:"), m_envVarsEdit);
 
-    // Strict node affinity binding option for NUMA-sensitive multi-node runs.
     m_strictAffinityBox = new QCheckBox(tr("Bind ranks to individual nodes (--map-by node)"), this);
     m_strictAffinityBox->setToolTip(
         tr("Passes --map-by node to the MPI launcher so each rank is pinned to\n"
            "a separate physical node. Useful for NUMA-sensitive workloads."));
-    form->addRow(tr("Strict Node Affinity:"), m_strictAffinityBox);
+    mpiForm->addRow(tr("Strict Node Affinity:"), m_strictAffinityBox);
 
-    // Opt-in toggle for exposing the experimental Submit Slurm Job action in the File menu.
-    auto* slurmOptInLayout = new QVBoxLayout();
+    auto* midSep = new QLabel(this);
+    midSep->setFixedHeight(1);
+    midSep->setObjectName(QStringLiteral("separator"));
+    root->addWidget(midSep);
+
+    // Section 2: Remote & Slurm Attach Defaults.
+    auto* remoteForm = makeSection(
+        tr("Remote &amp; Slurm Attach Defaults"),
+        tr("Control per-rank gdbserver port allocation, socket startup retries, and experimental Slurm menu access."));
+
+    m_baseGdbserverPortBox = new QSpinBox(this);
+    m_baseGdbserverPortBox->setObjectName(QStringLiteral("baseGdbserverPortSpin"));
+    m_baseGdbserverPortBox->setRange(1024, 65000);
+    m_baseGdbserverPortBox->setValue(2345);
+    m_baseGdbserverPortBox->setMinimumWidth(120);
+    m_baseGdbserverPortBox->setToolTip(
+        tr("Starting TCP port for per-rank gdbserver listeners (rank r binds base_port + r)."));
+    remoteForm->addRow(tr("Base GDBServer Port:"), m_baseGdbserverPortBox);
+
+    m_attachRetryTimeoutBox = new QSpinBox(this);
+    m_attachRetryTimeoutBox->setObjectName(QStringLiteral("attachRetryTimeoutSpin"));
+    m_attachRetryTimeoutBox->setRange(2, 120);
+    m_attachRetryTimeoutBox->setValue(15);
+    m_attachRetryTimeoutBox->setSuffix(tr(" s"));
+    m_attachRetryTimeoutBox->setMinimumWidth(120);
+    m_attachRetryTimeoutBox->setToolTip(
+        tr("How long GridLock retries remote gdbserver connections while srun/mpirun starts ranks."));
+    remoteForm->addRow(tr("Attach Retry Timeout (s):"), m_attachRetryTimeoutBox);
+
+    auto* slurmOptInWidget = new QWidget(this);
+    slurmOptInWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto* slurmOptInLayout = new QVBoxLayout(slurmOptInWidget);
     slurmOptInLayout->setContentsMargins(0, 0, 0, 0);
     slurmOptInLayout->setSpacing(3);
-    m_enableSlurmMenuBox = new QCheckBox(tr("Show \"Submit Slurm Job...\" in File menu"), this);
+
+    m_enableSlurmMenuBox = new QCheckBox(tr("Show \"Submit Slurm Job...\" in File menu"), slurmOptInWidget);
     m_enableSlurmMenuBox->setObjectName(QStringLiteral("enableSlurmMenuCheck"));
     m_enableSlurmMenuBox->setChecked(false);
-    m_slurmWarningLabel = new QLabel(tr("Experimental, untested, not responsible for breakage"), this);
+    slurmOptInLayout->addWidget(m_enableSlurmMenuBox);
+
+    m_slurmWarningLabel = new QLabel(tr("Experimental, untested, not responsible for breakage"), slurmOptInWidget);
     m_slurmWarningLabel->setObjectName(QStringLiteral("slurmExperimentalWarningLabel"));
     m_slurmWarningLabel->setStyleSheet(QStringLiteral("color: #ff4d4f; font-weight: bold;"));
+    m_slurmWarningLabel->setContentsMargins(0, 0, 0, 0);
     m_slurmWarningLabel->setWordWrap(true);
-    slurmOptInLayout->addWidget(m_enableSlurmMenuBox);
     slurmOptInLayout->addWidget(m_slurmWarningLabel);
-    form->addRow(tr("Slurm Integration:"), slurmOptInLayout);
 
-    addFormNote(this, form,
-                tr("<small style='color:#888;'>Changes are applied on the "
-                   "<b>next</b> debug session launch.</small>"));
+    auto* configSlurmRow = new QHBoxLayout();
+    configSlurmRow->setContentsMargins(0, 4, 0, 0);
+    auto* configSlurmBtn = new QPushButton(tr("Configure Slurm Script && Paths..."), slurmOptInWidget);
+    configSlurmBtn->setObjectName(QStringLiteral("configureSlurmIntegrationButton"));
+    configSlurmBtn->setToolTip(tr("Open the HPC Integration page to edit #SBATCH directives and Slurm tool paths."));
+    connect(configSlurmBtn, &QPushButton::clicked, this, &HpcSettingsPage::openHpcIntegrationRequested);
+    configSlurmRow->addWidget(configSlurmBtn);
+    configSlurmRow->addStretch(1);
+    slurmOptInLayout->addLayout(configSlurmRow);
+
+    remoteForm->addRow(tr("Slurm Integration:"), slurmOptInWidget);
+
+    auto* footerNote = new QLabel(
+        tr("<small style='color:#888;'>Changes are applied on the <b>next</b> debug session launch.</small>"), this);
+    footerNote->setWordWrap(true);
+    root->addWidget(footerNote);
+    root->addStretch(1);
 
     loadFromSettings();
 }
@@ -97,6 +196,8 @@ QString HpcSettingsPage::hostsFile() const { return m_hostsFileEdit->text().trim
 QString HpcSettingsPage::envVars() const { return m_envVarsEdit->toPlainText().trimmed(); }
 bool HpcSettingsPage::strictAffinity() const { return m_strictAffinityBox->isChecked(); }
 bool HpcSettingsPage::enableSlurmMenu() const { return m_enableSlurmMenuBox && m_enableSlurmMenuBox->isChecked(); }
+int HpcSettingsPage::baseGdbserverPort() const { return m_baseGdbserverPortBox ? m_baseGdbserverPortBox->value() : 2345; }
+int HpcSettingsPage::attachRetryTimeoutSec() const { return m_attachRetryTimeoutBox ? m_attachRetryTimeoutBox->value() : 15; }
 
 /**
  * @brief Restores cluster settings from ConfigManager.
@@ -106,6 +207,8 @@ void HpcSettingsPage::loadFromSettings() {
     m_hostsFileEdit->setText(hs.hostsFile);
     m_envVarsEdit->setPlainText(hs.envVars);
     m_strictAffinityBox->setChecked(hs.strictAffinity);
+    if (m_baseGdbserverPortBox) m_baseGdbserverPortBox->setValue(qBound(1024, hs.baseGdbserverPort, 65000));
+    if (m_attachRetryTimeoutBox) m_attachRetryTimeoutBox->setValue(qBound(2, hs.attachRetryTimeoutSec, 120));
     if (m_enableSlurmMenuBox) m_enableSlurmMenuBox->setChecked(hs.enableSlurmMenu);
 }
 

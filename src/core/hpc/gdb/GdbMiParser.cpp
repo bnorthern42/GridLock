@@ -4,11 +4,13 @@
  */
 
 #include "GdbRankCoordinator.hpp"
+#include "../../managers/ConfigManager.hpp"
 
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QTimer>
 
 namespace gridlock {
 
@@ -498,6 +500,23 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           (msg.contains(QStringLiteral("No registers"), Qt::CaseInsensitive) ||
            msg.contains(QStringLiteral("The program is not being run"), Qt::CaseInsensitive) ||
            msg.contains(QStringLiteral("Selected thread is running"), Qt::CaseInsensitive))) {
+        continue;
+      }
+      const int maxAttachRetries = qMax(4, core::ConfigManager::instance().getHpcSettings().attachRetryTimeoutSec * 4);
+      if (rp->pendingAttach && rp->isRemoteAttach && !rp->remoteTargetSelectCmd.isEmpty() &&
+          rp->remoteAttachRetries < maxAttachRetries &&
+          (msg.contains(QStringLiteral("Connection refused"), Qt::CaseInsensitive) ||
+           msg.contains(QStringLiteral("Connection reset"), Qt::CaseInsensitive) ||
+           msg.contains(QStringLiteral("Remote communication error"), Qt::CaseInsensitive) ||
+           msg.contains(QStringLiteral("End of file"), Qt::CaseInsensitive) ||
+           msg.contains(QStringLiteral("Timed out"), Qt::CaseInsensitive))) {
+        ++rp->remoteAttachRetries;
+        QTimer::singleShot(250, this, [this, rankId]() {
+          if (!m_shuttingDown && rankId >= 0 && rankId < static_cast<int>(m_processes.size()) &&
+              m_processes[rankId] && m_processes[rankId]->pendingAttach) {
+            writeCmd(rankId, m_processes[rankId]->remoteTargetSelectCmd);
+          }
+        });
         continue;
       }
       emit debuggerConsoleOutput(rankId, QStringLiteral("Error: ") + msg, true);

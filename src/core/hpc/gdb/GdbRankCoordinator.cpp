@@ -272,7 +272,11 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
     }
     if (const QString symBin = t.localSymbolBinary.trimmed(); !symBin.isEmpty())
       writeCmd(r, QStringLiteral("-file-exec-and-symbols %1\n").arg(detail::escapeGdbMiString(symBin)));
-    writeCmd(r, QStringLiteral("-target-select %1 %2\n").arg(t.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"), t.endpoint.trimmed()));
+    const QString targetSelectCmd = QStringLiteral("-target-select %1 %2\n")
+                                        .arg(t.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"),
+                                             t.endpoint.trimmed());
+    m_processes[r]->remoteTargetSelectCmd = targetSelectCmd;
+    writeCmd(r, targetSelectCmd);
     for (const auto& bp : m_pendingBreakpoints) {
       if (bp.rankFilter < 0 || bp.rankFilter == r)
         writeCmd(r, detail::buildBreakInsertCmd(bp.file, bp.line, bp.condition, bp.ignoreCount, bp.temporary, !bp.enabled));
@@ -356,6 +360,8 @@ void GdbRankCoordinator::stopAll(bool silentShutdown) {
   m_shuttingDown = true;
   QVector<pid_t> spawnedPids;
   if (m_mpirunProcess) m_mpirunProcess->disconnect();
+  const bool killRemoteStub = property("gl_terminate_remote_gdbserver").toBool();
+  if (killRemoteStub) setProperty("gl_terminate_remote_gdbserver", false);
   for (auto& rp : m_processes) {
     if (!rp) continue;
     const bool wasFifo = (rp->fifoInFd >= 0 || rp->fifoOutFd >= 0), wasAttached = rp->isAttached || rp->pendingAttach;
@@ -367,8 +373,13 @@ void GdbRankCoordinator::stopAll(bool silentShutdown) {
     if (wasFifo && !wasAttached && rp->inferiorPid > 0) ::kill(rp->inferiorPid, SIGTERM);
     if (rp->process) {
       if (rp->process->state() == QProcess::Starting) rp->process->waitForStarted(250);
-      if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable())
-        rp->process->write(wasAttached ? "-target-detach\n-gdb-exit\n" : "-gdb-exit\n");
+      if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable()) {
+        if (killRemoteStub && rp->isRemoteAttach) {
+          rp->process->write("-interpreter-exec console \"monitor exit\"\n-gdb-exit\n");
+        } else {
+          rp->process->write(wasAttached ? "-target-detach\n-gdb-exit\n" : "-gdb-exit\n");
+        }
+      }
       if (rp->process->state() != QProcess::NotRunning && !rp->process->waitForFinished(250)) {
         rp->process->terminate();
         if (!rp->process->waitForFinished(250)) { rp->process->kill(); rp->process->waitForFinished(250); }

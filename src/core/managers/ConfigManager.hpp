@@ -46,10 +46,12 @@ struct DebuggerSettings {
  * @brief Cluster hostfile, environment, and NUMA affinity parameters.
  */
 struct HpcSettings {
-  QString hostsFile = "";      ///< Path to MPI hostfile (empty = local execution).
-  QString envVars = "";        ///< Newline-separated `KEY=VALUE` environment variables.
-  bool strictAffinity = false; ///< Pass `--map-by node` to enforce strict node affinity.
-  bool enableSlurmMenu = false; ///< Opt-in toggle showing "Submit Slurm Job..." in the File menu.
+  QString hostsFile = "";          ///< Path to MPI hostfile (empty = local execution).
+  QString envVars = "";            ///< Newline-separated `KEY=VALUE` environment variables.
+  bool strictAffinity = false;     ///< Pass `--map-by node` to enforce strict node affinity.
+  bool enableSlurmMenu = false;    ///< Opt-in toggle showing "Submit Slurm Job..." in the File menu.
+  int baseGdbserverPort = 2345;    ///< Starting TCP port (`base + rank`) for Slurm/remote `gdbserver` listeners.
+  int attachRetryTimeoutSec = 15;  ///< Startup retry window (seconds) for remote `gdbserver` sockets.
 };
 
 /**

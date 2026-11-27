@@ -33,13 +33,20 @@ public:
     QString envVars() const;
     bool strictAffinity() const;
     bool enableSlurmMenu() const;
+    int baseGdbserverPort() const;
+    int attachRetryTimeoutSec() const;
 
     void loadFromSettings();
 
+signals:
+    void openHpcIntegrationRequested();
+
 private:
     QLineEdit* m_hostsFileEdit = nullptr;
-    QTextEdit* m_envVarsEdit = nullptr;
+    QPlainTextEdit* m_envVarsEdit = nullptr;
     QCheckBox* m_strictAffinityBox = nullptr;
+    QSpinBox* m_baseGdbserverPortBox = nullptr;
+    QSpinBox* m_attachRetryTimeoutBox = nullptr;
     QCheckBox* m_enableSlurmMenuBox = nullptr;
     QLabel* m_slurmWarningLabel = nullptr;
 };

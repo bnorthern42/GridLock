@@ -330,6 +330,26 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     inspector->setSourceFileFilter(sourceFilter);
     m_elfInspector = std::move(inspector);
     m_loadedBinaryPath = binInfo.absoluteFilePath();
+    if (m_targetSelector && m_loadedBinaryPath != activeTargetBinaryPath()) {
+        QSignalBlocker sb(m_targetSelector);
+        int existingIdx = -1;
+        for (int i = 0; i < m_targetSelector->count(); ++i) {
+            if (resolveWorkspacePath(m_targetSelector->itemData(i).toString()) == m_loadedBinaryPath) {
+                existingIdx = i;
+                break;
+            }
+        }
+        if (existingIdx < 0) {
+            const int insertAt = (m_targetSelector->count() > 0 &&
+                                  m_targetSelector->itemData(m_targetSelector->count() - 1).toString() == QStringLiteral("__open_binary__"))
+                                     ? (m_targetSelector->count() - 1)
+                                     : m_targetSelector->count();
+            m_targetSelector->insertItem(insertAt, binInfo.fileName(), m_loadedBinaryPath);
+            existingIdx = insertAt;
+        }
+        m_targetSelector->setCurrentIndex(existingIdx);
+        m_targetSelector->setProperty("gl_confirmed_idx", existingIdx);
+    }
 
     uint64_t mainAddr = 0ULL;
     QString mainSymName;

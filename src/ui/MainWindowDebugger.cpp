@@ -470,6 +470,7 @@ void MainWindow::stopTargetWorkflow() {
     m_debugSessionActive = false; m_remoteAttachSession = false; m_rankLoopCounter.clear();
     if (!m_attachingSlurmJob && m_hpcBackend) {
         if (auto* slurm = dynamic_cast<gridlock::core::LocalSlurmBackend*>(m_hpcBackend); slurm && slurm->isJobActive()) {
+            if (m_coordinator) m_coordinator->setProperty("gl_terminate_remote_gdbserver", true);
             slurm->cancelActiveJob();
         }
     }

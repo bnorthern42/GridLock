@@ -55,7 +55,7 @@ class LocalSlurmBackend : public HpcBackend {
 
   int activeJobId() const { return m_activeJobId; }
   bool isJobActive() const { return m_activeJobId > 0; }
-  int basePort() const { return m_basePort; }
+  int basePort() const;
   QString lastStagedScriptPath() const { return m_lastStagedScriptPath; }
   QString lastWrapperScriptPath() const { return m_lastWrapperScriptPath; }
   QStringList resolvedComputeEndpoints() const { return m_resolvedComputeEndpoints; }
@@ -99,6 +99,7 @@ class LocalSlurmBackend : public HpcBackend {
   QTimer* m_pollTimer = nullptr;
   int m_pollIntervalMs = 1000;
   int m_basePort = 2345;
+  bool m_basePortOverridden = false;
   int m_activeJobId = -1;
   int m_expectedRanks = 1;
   int m_emptyPollRetries = 0;
