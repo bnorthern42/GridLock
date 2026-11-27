@@ -9,14 +9,18 @@
  */
 
 #include <QDockWidget>
-#include <QTreeView>
+#include <QFileInfo>
 #include <QFileSystemModel>
 #include <QIdentityProxyModel>
-#include <QPushButton>
-#include <QToolButton>
-#include <QStackedWidget>
-#include <QTableWidget>
 #include <QLineEdit>
+#include <QPair>
+#include <QPushButton>
+#include <QStackedWidget>
+#include <QStandardItemModel>
+#include <QTableWidget>
+#include <QToolButton>
+#include <QTreeView>
+#include <QVector>
 #include <cstdint>
 #include <vector>
 
@@ -234,6 +238,10 @@ private slots:
 private:
     static void configureSortableTable(QTableWidget* table, const QString& objName,
                                        const QStringList& headers, const QList<int>& widths);
+    static int fuzzyMatchScore(const QString& query, const QString& candidate);
+    static bool isIgnoredDirectoryName(const QString& dirName);
+    QFileInfo fileInfoForIndex(const QModelIndex& index) const;
+    void rebuildProjectFileIndex();
     void applyExplorerFilter(const QString& filterText);
     void populateSymbolsTable(const QString& filterText = QString());
     void populateStringsTable(const QString& filterText = QString());
@@ -242,7 +250,10 @@ private:
     QString m_rootPath;
     QTreeView* m_treeView = nullptr;
     QFileSystemModel* m_fileSystemModel = nullptr;
+    QStandardItemModel* m_filteredFileModel = nullptr;
     FileIconProvider* m_iconProvider = nullptr;
+    QVector<QPair<QString, QString>> m_indexedFiles;
+    bool m_fileIndexDirty = true;
     QPushButton* m_openFolderBtn = nullptr;
     QPushButton* m_collapseAllBtn = nullptr;
     QPushButton* m_filesModeBtn = nullptr;

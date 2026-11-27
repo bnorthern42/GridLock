@@ -9,15 +9,22 @@
 
 #include "ProjectExplorerWidget.hpp"
 
+#include <algorithm>
+
+#include <QBrush>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QFontInfo>
+#include <QHash>
 #include <QInputDialog>
 #include <QMenu>
 #include <QMessageBox>
+#include <QRegularExpression>
 #include <QSettings>
+#include <QStandardItem>
 
 #include "../../core/managers/ThemeManager.hpp"
 #include "../utils/FileDialogHelper.hpp"
@@ -108,21 +115,188 @@ bool ProjectExplorerWidget::activateString(const QString& queryText) {
   return false;
 }
 
+bool ProjectExplorerWidget::isIgnoredDirectoryName(const QString& dirName) {
+  const QString low = dirName.toLower();
+  return low == QLatin1String(".git") || low == QLatin1String("builddir") ||
+         low == QLatin1String("build") || low == QLatin1String("node_modules") ||
+         low == QLatin1String(".cache") || low == QLatin1String("__pycache__") ||
+         low == QLatin1String(".venv") || low == QLatin1String("venv") ||
+         low == QLatin1String(".svn") || low == QLatin1String(".hg") ||
+         low == QLatin1String("cmakefiles");
+}
+
+int ProjectExplorerWidget::fuzzyMatchScore(const QString& query, const QString& candidate) {
+  const QString q = query.trimmed();
+  if (q.isEmpty()) return 0;
+  if (candidate.isEmpty()) return -1;
+
+  if (q.contains(QLatin1Char('*')) || q.contains(QLatin1Char('?'))) {
+    const QRegularExpression rx = QRegularExpression::fromWildcard(q, Qt::CaseInsensitive);
+    return rx.match(candidate).hasMatch() ? 500 : -1;
+  }
+
+  const QString ql = q.toLower();
+  const QString cl = candidate.toLower();
+  if (cl == ql) return 1000;
+  if (cl.startsWith(ql)) return 850;
+  if (const int pos = cl.indexOf(ql); pos >= 0) {
+    int bonus = 0;
+    if (pos == 0 || candidate[pos - 1] == QLatin1Char('/') || candidate[pos - 1] == QLatin1Char('_') ||
+        candidate[pos - 1] == QLatin1Char('-') || candidate[pos - 1] == QLatin1Char('.') ||
+        candidate[pos].isUpper()) {
+      bonus = 50;
+    }
+    return 700 + bonus - qMin(pos, 200);
+  }
+
+  int qi = 0;
+  int prevMatch = -2;
+  int score = 200;
+  for (int ci = 0; ci < cl.size() && qi < ql.size(); ++ci) {
+    if (cl[ci] == ql[qi]) {
+      if (ci == prevMatch + 1) {
+        score += 15;
+      } else if (prevMatch >= 0) {
+        score -= qMin(ci - prevMatch - 1, 12);
+      }
+      if (ci == 0 || candidate[ci].isUpper() || candidate[ci - 1] == QLatin1Char('/') ||
+          candidate[ci - 1] == QLatin1Char('_') || candidate[ci - 1] == QLatin1Char('-') ||
+          candidate[ci - 1] == QLatin1Char('.')) {
+        score += 20;
+      }
+      prevMatch = ci;
+      ++qi;
+    }
+  }
+  return (qi == ql.size()) ? qMax(1, score) : -1;
+}
+
+QFileInfo ProjectExplorerWidget::fileInfoForIndex(const QModelIndex& index) const {
+  if (!index.isValid()) return QFileInfo();
+  if (m_filteredFileModel && m_treeView && m_treeView->model() == m_filteredFileModel) {
+    return QFileInfo(index.data(Qt::UserRole).toString());
+  }
+  return m_fileSystemModel ? m_fileSystemModel->fileInfo(index) : QFileInfo();
+}
+
+void ProjectExplorerWidget::rebuildProjectFileIndex() {
+  m_indexedFiles.clear();
+  m_fileIndexDirty = false;
+  if (m_rootPath.isEmpty()) return;
+  const QDir rootDir(m_rootPath);
+  if (!rootDir.exists()) return;
+
+  constexpr int kMaxIndexedFiles = 25000;
+  QStringList pendingDirs{m_rootPath};
+  while (!pendingDirs.isEmpty() && m_indexedFiles.size() < kMaxIndexedFiles) {
+    const QString curPath = pendingDirs.takeFirst();
+    const QDir curDir(curPath);
+    const QFileInfoList entries = curDir.entryInfoList(
+        QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files,
+        QDir::DirsFirst | QDir::Name | QDir::IgnoreCase);
+    for (const QFileInfo& fi : entries) {
+      if (fi.isSymLink()) continue;
+      if (fi.isDir()) {
+        if (!isIgnoredDirectoryName(fi.fileName())) pendingDirs.append(fi.absoluteFilePath());
+      } else {
+        m_indexedFiles.append({rootDir.relativeFilePath(fi.absoluteFilePath()), fi.absoluteFilePath()});
+        if (m_indexedFiles.size() >= kMaxIndexedFiles) break;
+      }
+    }
+  }
+}
+
 /** @brief Applies the unified explorer filter bar query to whichever page is active. */
 void ProjectExplorerWidget::applyExplorerFilter(const QString& filterText) {
   if (isSymbolsMode()) { populateSymbolsTable(filterText); return; }
   if (isStringsMode()) { populateStringsTable(filterText); return; }
-  if (!m_fileSystemModel) return;
+  if (!m_fileSystemModel || !m_treeView || !m_filteredFileModel) return;
+
   const QString query = filterText.trimmed();
-  m_fileSystemModel->setNameFilterDisables(false);
   if (query.isEmpty()) {
     m_fileSystemModel->setNameFilters(QStringList());
+    if (m_treeView->model() != m_fileSystemModel) {
+      m_treeView->setModel(m_fileSystemModel);
+      m_treeView->hideColumn(1);
+      m_treeView->hideColumn(2);
+      m_treeView->hideColumn(3);
+    }
+    const QModelIndex rootIdx = m_fileSystemModel->index(m_rootPath);
+    if (rootIdx.isValid()) m_treeView->setRootIndex(rootIdx);
+    m_treeView->collapseAll();
     return;
   }
-  const QString pattern = (query.contains(QLatin1Char('*')) || query.contains(QLatin1Char('?')))
-                              ? query
-                              : (QStringLiteral("*") + query + QStringLiteral("*"));
-  m_fileSystemModel->setNameFilters(QStringList{pattern});
+
+  if (m_fileIndexDirty) rebuildProjectFileIndex();
+
+  struct ScoredMatch {
+    int score = 0;
+    QString relPath;
+    QString absPath;
+  };
+  QVector<ScoredMatch> matches;
+  matches.reserve(128);
+  for (const auto& [relPath, absPath] : m_indexedFiles) {
+    const int slash = relPath.lastIndexOf(QLatin1Char('/'));
+    const QString fileName = (slash >= 0) ? relPath.mid(slash + 1) : relPath;
+    const int nameScore = fuzzyMatchScore(query, fileName);
+    const int pathScore = fuzzyMatchScore(query, relPath);
+    const int best = qMax(nameScore >= 0 ? nameScore + 200 : -1, pathScore);
+    if (best >= 0) matches.append({best, relPath, absPath});
+  }
+
+  std::sort(matches.begin(), matches.end(), [](const ScoredMatch& a, const ScoredMatch& b) {
+    if (a.score != b.score) return a.score > b.score;
+    return a.relPath.compare(b.relPath, Qt::CaseInsensitive) < 0;
+  });
+
+  m_filteredFileModel->clear();
+  m_filteredFileModel->setHorizontalHeaderLabels({QStringLiteral("Name")});
+  QStandardItem* rootItem = m_filteredFileModel->invisibleRootItem();
+  QHash<QString, QStandardItem*> folderItems;
+
+  auto& tm = gridlock::core::managers::ThemeManager::instance();
+  QColor mutedColor(tm.paletteForTheme(tm.activeThemeId()).textHex);
+  mutedColor.setAlpha(128);
+  const QBrush mutedBrush(mutedColor);
+
+  const QDir rootDir(m_rootPath);
+  for (const ScoredMatch& m : matches) {
+    const QStringList parts = m.relPath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    if (parts.isEmpty()) continue;
+
+    QStandardItem* parentItem = rootItem;
+    QString curRel;
+    for (int i = 0; i < parts.size() - 1; ++i) {
+      curRel = curRel.isEmpty() ? parts[i] : (curRel + QLatin1Char('/') + parts[i]);
+      QStandardItem* folderNode = folderItems.value(curRel, nullptr);
+      if (!folderNode) {
+        const QString absFolder = rootDir.filePath(curRel);
+        folderNode = new QStandardItem(parts[i]);
+        folderNode->setEditable(false);
+        folderNode->setData(absFolder, Qt::UserRole);
+        if (m_iconProvider) folderNode->setIcon(m_iconProvider->icon(QFileInfo(absFolder)));
+        parentItem->appendRow(folderNode);
+        folderItems.insert(curRel, folderNode);
+      }
+      parentItem = folderNode;
+    }
+
+    const QFileInfo fi(m.absPath);
+    auto* fileItem = new QStandardItem(parts.last());
+    fileItem->setEditable(false);
+    fileItem->setData(m.absPath, Qt::UserRole);
+    fileItem->setToolTip(m.relPath);
+    if (m_iconProvider) fileItem->setIcon(m_iconProvider->icon(fi));
+    if (FileIconProvider::isBuildArtifactFile(fi)) fileItem->setForeground(mutedBrush);
+    parentItem->appendRow(fileItem);
+  }
+
+  if (m_treeView->model() != m_filteredFileModel) {
+    m_treeView->setModel(m_filteredFileModel);
+  }
+  m_treeView->setRootIndex(QModelIndex());
+  m_treeView->expandAll();
 }
 
 void ProjectExplorerWidget::filterSymbols(const QString& filterText) { populateSymbolsTable(filterText); }
@@ -234,10 +408,17 @@ void ProjectExplorerWidget::setRootPath(const QString& path) {
   const QString resolvedDir =
       !dirInfo.canonicalFilePath().isEmpty() ? dirInfo.canonicalFilePath() : QDir::cleanPath(dirInfo.absoluteFilePath());
   m_rootPath = resolvedDir;
+  m_fileIndexDirty = true;
 
   if (m_fileSystemModel && m_treeView) {
     m_fileSystemModel->setRootPath(QString());
     const QModelIndex rootIdx = m_fileSystemModel->setRootPath(resolvedDir);
+    if (m_treeView->model() != m_fileSystemModel) {
+      m_treeView->setModel(m_fileSystemModel);
+      m_treeView->hideColumn(1);
+      m_treeView->hideColumn(2);
+      m_treeView->hideColumn(3);
+    }
     m_treeView->setRootIndex(rootIdx.isValid() ? rootIdx : m_fileSystemModel->index(resolvedDir));
     m_treeView->clearSelection();
   }
@@ -247,15 +428,26 @@ void ProjectExplorerWidget::setRootPath(const QString& path) {
 
 void ProjectExplorerWidget::onDoubleClicked(const QModelIndex& index) {
   if (!index.isValid()) return;
-  const QFileInfo info = m_fileSystemModel->fileInfo(index);
+  const QFileInfo info = fileInfoForIndex(index);
   if (info.isFile()) emit fileDoubleClicked(info.absoluteFilePath());
 }
 
 void ProjectExplorerWidget::refreshTreeViewPath(const QString& focusPath) {
   if (!m_fileSystemModel || !m_treeView) return;
+  m_fileIndexDirty = true;
   const QString root = !m_rootPath.isEmpty() ? m_rootPath : m_fileSystemModel->rootPath();
   m_fileSystemModel->setRootPath(QString());
   const QModelIndex rootIdx = m_fileSystemModel->setRootPath(root);
+  if (m_explorerFilterEdit && !m_explorerFilterEdit->text().trimmed().isEmpty() && !isSymbolsMode() && !isStringsMode()) {
+    applyExplorerFilter(m_explorerFilterEdit->text());
+    return;
+  }
+  if (m_treeView->model() != m_fileSystemModel) {
+    m_treeView->setModel(m_fileSystemModel);
+    m_treeView->hideColumn(1);
+    m_treeView->hideColumn(2);
+    m_treeView->hideColumn(3);
+  }
   m_treeView->setRootIndex(rootIdx.isValid() ? rootIdx : m_fileSystemModel->index(root));
   if (!focusPath.isEmpty()) {
     const QModelIndex idx = m_fileSystemModel->index(focusPath);
@@ -345,7 +537,7 @@ bool ProjectExplorerWidget::registerSourceInBuildFile(const QString& buildFilePa
 void ProjectExplorerWidget::onTreeCustomContextMenu(const QPoint& pos) {
   if (!m_treeView || !m_fileSystemModel) return;
   const QModelIndex idx = m_treeView->indexAt(pos);
-  const QFileInfo selInfo = idx.isValid() ? m_fileSystemModel->fileInfo(idx) : QFileInfo(m_fileSystemModel->rootPath());
+  const QFileInfo selInfo = idx.isValid() ? fileInfoForIndex(idx) : QFileInfo(m_rootPath);
   const QString targetDir = selInfo.isDir() ? selInfo.absoluteFilePath() : selInfo.absolutePath();
 
   QMenu menu(this);

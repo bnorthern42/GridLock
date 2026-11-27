@@ -151,6 +151,9 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget* parent)
   m_fileSystemModel = new ExplorerFileSystemModel(this);
   m_fileSystemModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
   m_fileSystemModel->setRootPath(m_rootPath);
+  m_filteredFileModel = new QStandardItemModel(this);
+  m_filteredFileModel->setHorizontalHeaderLabels({QStringLiteral("Name")});
+  m_fileIndexDirty = true;
 
   m_iconProvider = new FileIconProvider();
   m_fileSystemModel->setIconProvider(m_iconProvider);
@@ -219,8 +222,8 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget* parent)
   auto* renameShortcut = new QShortcut(QKeySequence(Qt::Key_F2), m_treeView);
   connect(renameShortcut, &QShortcut::activated, this, [this]() {
     const QModelIndex idx = m_treeView->currentIndex();
-    if (!idx.isValid() || !m_fileSystemModel) return;
-    const QFileInfo fi = m_fileSystemModel->fileInfo(idx);
+    const QFileInfo fi = fileInfoForIndex(idx);
+    if (!fi.exists()) return;
     bool ok = false;
     const QString newName = QInputDialog::getText(this, tr("Rename Entry"), tr("New name:"), QLineEdit::Normal, fi.fileName(), &ok);
     if (ok && !newName.trimmed().isEmpty()) renameEntry(fi.absoluteFilePath(), newName.trimmed());
@@ -291,8 +294,8 @@ void ProjectExplorerWidget::populateSymbolsTable(const QString& filterText) {
 
   for (const auto& entry : m_symbols) {
     const QString addrStr = QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
-    if (!query.isEmpty() && !entry.name.contains(query, Qt::CaseInsensitive) &&
-        !addrStr.contains(query, Qt::CaseInsensitive)) {
+    if (!query.isEmpty() && fuzzyMatchScore(query, entry.name) < 0 &&
+        fuzzyMatchScore(query, addrStr) < 0) {
       continue;
     }
 
@@ -341,9 +344,9 @@ void ProjectExplorerWidget::populateStringsTable(const QString& filterText) {
 
   for (const auto& entry : m_strings) {
     const QString addrStr = QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
-    if (!query.isEmpty() && !entry.value.contains(query, Qt::CaseInsensitive) &&
-        !entry.section.contains(query, Qt::CaseInsensitive) &&
-        !addrStr.contains(query, Qt::CaseInsensitive)) {
+    if (!query.isEmpty() && fuzzyMatchScore(query, entry.value) < 0 &&
+        fuzzyMatchScore(query, entry.section) < 0 &&
+        fuzzyMatchScore(query, addrStr) < 0) {
       continue;
     }
 

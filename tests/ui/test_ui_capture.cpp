@@ -472,3 +472,109 @@ void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadr
     for (QLabel* lbl : prefsDialog.findChildren<QLabel*>()) for (const QString& r : {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")}) if (lbl->text().trimmed() == r) { swatchBoxes.append(lbl); break; }
     QVERIFY2(swatchBoxes.size() == 5 && swatchBoxes.first()->toolTip().contains('#'), "Expected 5 spaced role swatch boxes with hex tooltips");
 }
+
+void TestMainWindowUI::testProjectFilesFuzzySearch() {
+    QTemporaryDir projDir;
+    QVERIFY(projDir.isValid());
+    auto touch = [&](const QString& relPath) -> QString {
+        const QString absPath = QDir(projDir.path()).filePath(relPath);
+        if (!QDir().mkpath(QFileInfo(absPath).absolutePath())) return QString();
+        QFile f(absPath);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return QString();
+        f.write("// fixture\n");
+        f.close();
+        return QFileInfo(absPath).absoluteFilePath();
+    };
+
+    const QString mwCpp = touch(QStringLiteral("src/ui/MainWindow.cpp"));
+    const QString mwBuildCpp = touch(QStringLiteral("src/ui/MainWindowBuild.cpp"));
+    const QString slurmCpp = touch(QStringLiteral("src/core/hpc/LocalSlurmBackend.cpp"));
+    QVERIFY(!mwCpp.isEmpty() && !mwBuildCpp.isEmpty() && !slurmCpp.isEmpty());
+    QVERIFY(!touch(QStringLiteral("docs/guide.md")).isEmpty());
+    QVERIFY(!touch(QStringLiteral("builddir/MainWindow.cpp.o")).isEmpty());
+
+    gridlock::ui::ProjectExplorerWidget explorer;
+    explorer.resize(300, 520);
+    explorer.setRootPath(projDir.path());
+    explorer.show();
+    QApplication::processEvents();
+
+    auto* filterEdit = explorer.findChild<QLineEdit*>(QStringLiteral("explorerFilterEdit"));
+    auto* tree = explorer.findChild<QTreeView*>();
+    QVERIFY(filterEdit && tree && tree->model());
+
+    auto collectVisibleNodes = [&](QStringList& outNames, QModelIndex* outMwIdx) {
+        outNames.clear();
+        std::function<void(const QModelIndex&)> walk = [&](const QModelIndex& parent) {
+            const int rows = tree->model()->rowCount(parent);
+            for (int r = 0; r < rows; ++r) {
+                const QModelIndex idx = tree->model()->index(r, 0, parent);
+                const QString name = idx.data().toString();
+                outNames.append(name);
+                if (outMwIdx && name == QLatin1String("MainWindow.cpp")) *outMwIdx = idx;
+                walk(idx);
+            }
+        };
+        walk(tree->rootIndex());
+    };
+
+    // 1. Substring search across unexpanded nested directories ("mainwindow").
+    filterEdit->setText(QStringLiteral("mainwindow"));
+    QApplication::processEvents();
+    QStringList names;
+    QModelIndex mwIdx;
+    collectVisibleNodes(names, &mwIdx);
+    QVERIFY2(names.contains(QStringLiteral("MainWindow.cpp")) && names.contains(QStringLiteral("MainWindowBuild.cpp")),
+             qPrintable(names.join(QStringLiteral(", "))));
+    QVERIFY2(!names.contains(QStringLiteral("docs")) && !names.contains(QStringLiteral("guide.md")) &&
+             !names.contains(QStringLiteral("builddir")) && !names.contains(QStringLiteral("MainWindow.cpp.o")),
+             qPrintable(names.join(QStringLiteral(", "))));
+    QVERIFY(mwIdx.isValid() && mwIdx.parent().isValid() && mwIdx.parent().parent().isValid());
+    QVERIFY2(tree->isExpanded(mwIdx.parent()) && tree->isExpanded(mwIdx.parent().parent()),
+             "Matching ancestor folders (src -> ui) must auto-expand when filtering");
+
+    // Double-clicking a filtered result emits fileDoubleClicked with the exact absolute path.
+    QSignalSpy openSpy(&explorer, &gridlock::ui::ProjectExplorerWidget::fileDoubleClicked);
+    emit tree->doubleClicked(mwIdx);
+    QCOMPARE(openSpy.count(), 1);
+    QCOMPARE(openSpy.takeFirst().at(0).toString(), mwCpp);
+
+    // 2. Fuzzy subsequence queries ("mwbuild" and "slurmback").
+    filterEdit->setText(QStringLiteral("mwbuild"));
+    QApplication::processEvents();
+    collectVisibleNodes(names, nullptr);
+    QVERIFY2(names.contains(QStringLiteral("MainWindowBuild.cpp")) && !names.contains(QStringLiteral("MainWindow.cpp")) &&
+             !names.contains(QStringLiteral("docs")) && !names.contains(QStringLiteral("builddir")),
+             qPrintable(names.join(QStringLiteral(", "))));
+    QVERIFY(QFileInfo::exists(mwBuildCpp));
+
+    filterEdit->setText(QStringLiteral("slurmback"));
+    QApplication::processEvents();
+    collectVisibleNodes(names, nullptr);
+    QVERIFY2(names.contains(QStringLiteral("LocalSlurmBackend.cpp")) && !names.contains(QStringLiteral("docs")),
+             qPrintable(names.join(QStringLiteral(", "))));
+    QVERIFY(QFileInfo::exists(slurmCpp));
+
+    // 3. Clearing the filter restores the unexpanded root directory view.
+    filterEdit->clear();
+    QApplication::processEvents();
+    const QModelIndex rootIdx = tree->rootIndex();
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
+        QStringList rootKids;
+        for (int r = 0; r < tree->model()->rowCount(rootIdx); ++r) {
+            rootKids << tree->model()->index(r, 0, rootIdx).data().toString();
+        }
+        return rootKids.contains(QStringLiteral("src")) && rootKids.contains(QStringLiteral("docs"));
+    })(), 3000);
+    for (int r = 0; r < tree->model()->rowCount(rootIdx); ++r) {
+        QVERIFY2(!tree->isExpanded(tree->model()->index(r, 0, rootIdx)),
+                 "Clearing the filter bar must restore the collapsed root tree");
+    }
+
+    // 4. Consistent fuzzy subsequence matching on SYMBOLS tab ("mpinit" -> "MPI_Init").
+    explorer.setSymbols({{QStringLiteral("MPI_Init"), 0x401050ULL, 16}, {QStringLiteral("compute_flux"), 0x401200ULL, 32}});
+    explorer.setSymbolsMode(true);
+    filterEdit->setText(QStringLiteral("mpinit"));
+    QApplication::processEvents();
+    QCOMPARE(explorer.symbolCount(), 1);
+}

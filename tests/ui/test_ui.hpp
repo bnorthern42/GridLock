@@ -219,5 +219,8 @@ private slots:
 
     /** @brief Verifies SlurmBatchParser directive round-tripping, full 21-field HPC Integration QSettings persistence, binary {FILE} resolution, and end-to-end offline Slurm attach/scancel. */
     void testSlurmParserPersistenceAndLocalBackendWorkflow();
+
+    /** @brief Verifies PROJECT / SYMBOLS FILES recursive fuzzy search, auto-expand, ignored build dirs, and collapsed restore on clear. */
+    void testProjectFilesFuzzySearch();
 };
 
