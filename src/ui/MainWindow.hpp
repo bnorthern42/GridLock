@@ -446,6 +446,7 @@ private:
     QAction* m_stepBackTbAct = nullptr; QAction* m_revContinueTbAct = nullptr;
     QAction* m_navBackTbAct = nullptr; QAction* m_navForwardTbAct = nullptr;
     QAction* m_searchEverywhereAct = nullptr; QAction* m_seekBarTbAct = nullptr;
+    QAction* m_submitSlurmJobAction = nullptr;
     QMenu* m_stepIntoMenu = nullptr;
     QList<QAction*> m_perspActs, m_dynamicToolbarActions;
     QList<QPointer<QWidget>> m_dynamicToolbarWidgets;

@@ -205,6 +205,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     }
     setMenuBarWindowControlsVisible(cfg.showMenuBarWindowControls());
     cfg.registerMenuBarWindowControlsListener(this, [this](bool vis) { setMenuBarWindowControlsVisible(vis); });
+    if (m_submitSlurmJobAction) m_submitSlurmJobAction->setVisible(cfg.getHpcSettings().enableSlurmMenu);
+    cfg.registerSlurmMenuVisibilityListener(this, [this](bool vis) {
+        if (m_submitSlurmJobAction) m_submitSlurmJobAction->setVisible(vis);
+    });
     applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
     loadRemoteTargetDialogState();
     syncCoordinatorWithConfig();
@@ -404,8 +408,10 @@ void MainWindow::setupMenu() {
     attachProcAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
     connect(attachProcAction, &QAction::triggered, this, [this]() { attachToProcessWorkflow(); });
 
-    QAction* slurmAction = fileMenu->addAction("Submit SLURM Job");
-    connect(slurmAction, &QAction::triggered, this, [this]() {
+    m_submitSlurmJobAction = fileMenu->addAction(QStringLiteral("Submit Slurm Job..."));
+    m_submitSlurmJobAction->setObjectName(QStringLiteral("actionSubmitSlurmJob"));
+    m_submitSlurmJobAction->setVisible(gridlock::core::ConfigManager::instance().getHpcSettings().enableSlurmMenu);
+    connect(m_submitSlurmJobAction, &QAction::triggered, this, [this]() {
         QString script = gridlock::core::ConfigManager::instance().getSlurmSettings().scriptTemplate; script.replace("{FILE}", m_currentFile);
         if (m_spackManager) { m_spackManager->appendMessage("Submitting SLURM batch job..."); m_bottomTabs->setCurrentWidget(m_spackManager); }
         m_hpcBackend->submitSlurmJob(script);

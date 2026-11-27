@@ -20,6 +20,8 @@
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
+#include <QMenuBar>
 #include <QProcess>
 #include <QPushButton>
 #include <QSpinBox>
@@ -36,6 +38,7 @@
 #include "../../src/core/models/VariableTreeModel.hpp"
 #include "../../src/core/utils/ElfBinaryInspector.hpp"
 #include "../../src/ui/MainWindow.hpp"
+#include "../../src/ui/dialogs/preferences/PreferencesDialog.hpp"
 #include "../../src/ui/dialogs/preferences/PreferencesDialog.hpp"
 #include "../../src/ui/docks/CallStackDockWidget.hpp"
 #include "../../src/ui/docks/VariablesDockWidget.hpp"
@@ -390,4 +393,58 @@ void TestMainWindowUI::testFloatingDockPopOutAndDragBackRedock() {
     QVERIFY2(mainWindow.isDockFloating(serverRackDock) && mainWindow.isDockFloating(registerDock), "Both docks must be floating");
     mainWindow.redockAllFloatingPanels();
     QVERIFY2(!mainWindow.isDockFloating(serverRackDock) && !mainWindow.isDockFloating(registerDock), "Both docks must be docked after redockAllFloatingPanels");
+}
+
+void TestMainWindowUI::testSlurmFileMenuOptInToggle() {
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    const auto origHpc = cfg.getHpcSettings();
+    struct HpcRestore {
+        gridlock::core::HpcSettings orig;
+        ~HpcRestore() { gridlock::core::ConfigManager::instance().saveHpcSettings(orig); }
+    } guard{origHpc};
+
+    // Reset opt-in to default false before instantiating MainWindow.
+    auto resetHpc = origHpc; resetHpc.enableSlurmMenu = false; cfg.saveHpcSettings(resetHpc);
+
+    gridlock::ui::MainWindow mw; mw.resize(1280, 800); mw.show(); QApplication::processEvents();
+    auto* slurmAct = mw.findChild<QAction*>(QStringLiteral("actionSubmitSlurmJob"));
+    QVERIFY2(slurmAct != nullptr && !slurmAct->isVisible(), "Submit Slurm Job... must be hidden in File menu by default");
+
+    // Confirm no adjacent double visible separators in the File menu while hidden.
+    QMenu* fileMenu = nullptr;
+    for (QAction* topAct : mw.menuBar()->actions()) {
+        if (topAct && topAct->text().remove(QLatin1Char('&')) == QLatin1String("File")) { fileMenu = topAct->menu(); break; }
+    }
+    QVERIFY(fileMenu != nullptr && fileMenu->actions().contains(slurmAct));
+    bool prevWasSep = false;
+    for (QAction* a : fileMenu->actions()) {
+        if (!a || !a->isVisible()) continue;
+        QVERIFY2(!(prevWasSep && a->isSeparator()), "File menu must not contain adjacent visible separators");
+        prevWasSep = a->isSeparator();
+    }
+
+    // Open Preferences -> HPC / Cluster and verify unchecked default + bold red warning label.
+    gridlock::ui::PreferencesDialog prefs(&mw);
+    auto* slurmCheck = prefs.findChild<QCheckBox*>(QStringLiteral("enableSlurmMenuCheck"));
+    auto* warnLbl = prefs.findChild<QLabel*>(QStringLiteral("slurmExperimentalWarningLabel"));
+    QVERIFY2(slurmCheck != nullptr && !slurmCheck->isChecked() && slurmCheck->text().contains(QStringLiteral("Submit Slurm Job...")),
+             "HPC / Cluster settings must expose unchecked opt-in checkbox for Submit Slurm Job...");
+    QVERIFY2(warnLbl != nullptr && warnLbl->text() == QStringLiteral("Experimental, untested, not responsible for breakage") &&
+             warnLbl->styleSheet().contains(QStringLiteral("#ff4d4f")) && warnLbl->styleSheet().contains(QStringLiteral("bold")),
+             "HPC / Cluster settings must display bold red experimental warning");
+
+    // Check the opt-in toggle and Apply: File menu action becomes visible live.
+    slurmCheck->setChecked(true);
+    auto* btnBox = prefs.findChild<QDialogButtonBox*>();
+    QVERIFY(btnBox != nullptr);
+    QPushButton* applyBtn = btnBox->button(QDialogButtonBox::Apply);
+    QPushButton* okBtn = btnBox->button(QDialogButtonBox::Ok);
+    QVERIFY(applyBtn && okBtn);
+    applyBtn->click(); QApplication::processEvents();
+    QVERIFY2(cfg.getHpcSettings().enableSlurmMenu && slurmAct->isVisible(), "Applying opt-in checkbox must show Submit Slurm Job... in File menu");
+
+    // Uncheck and click OK: File menu action hides again live.
+    slurmCheck->setChecked(false);
+    okBtn->click(); QApplication::processEvents();
+    QVERIFY2(!cfg.getHpcSettings().enableSlurmMenu && !slurmAct->isVisible(), "Unchecking opt-in checkbox and clicking OK must hide Submit Slurm Job...");
 }

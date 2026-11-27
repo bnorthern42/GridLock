@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added headless `QtTest` regression coverage (`testRemoteTargetPersistenceAndExitedRankGuard`, `testRemoteTargetQSettingsAndQemuStubAttach`, and `testRemoteTomlImportAndValidation`) verifying `remote.toml` import/export and malformed-file error handling, isolated `QSettings` round-trip persistence across restarts, single-rank QEMU system `gdbstub` (`localhost:1234` without a local ELF symbol binary) attach/detach, initial remote attach stop retention, tutorial tab dismissal, and exited-inferior inspection guards.
 
 ### Changed
+- **Experimental Slurm File Menu Opt-In (`MainWindow`, `HpcSettingsPage`, `PreferencesDialog`, `ConfigManager`)**:
+  - Hid **Submit Slurm Job...** from the top-level **File** menu by default and gated its live visibility behind an opt-in checkbox (`hpc/enable_slurm_menu`, default `false`) in **Preferences -> HPC / Cluster** accompanied by a bold red experimental warning (`Experimental, untested, not responsible for breakage`).
 - **Meson `>= 1.3.0` Build Requirement & HPC Prerequisites (`meson.build`, `README.md`)**:
   - Added `meson_version : '>= 1.3.0'` to `project('GridLock', ...)` in `meson.build` so older system Meson releases fail immediately with a clear version diagnostic rather than `cpp_std=c++23` or `icx`/`icpx` compiler errors, and documented Meson `>= 1.3.0`, C++23 compiler (GCC `13+`, Clang `17+`, Intel `icpx` `2024+`), Qt 6, and GDB `>= 10.0` prerequisites (including user-local `pip` installation on HPC clusters) in `README.md`.
 - **Documentation, Security Policy & Contributor Guide (`README.md`, `docs/HPC-Remote-and-Slurm.md`, `SECURITY.md`, `CONTRIBUTING.md`)**:

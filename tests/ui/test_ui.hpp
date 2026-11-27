@@ -213,5 +213,8 @@ private slots:
 
     /** @brief Verifies remote.toml preset import/export, array and range endpoints, path substitutions, malformed TOML validation, and examples/remote.toml. */
     void testRemoteTomlImportAndValidation();
+
+    /** @brief Verifies Submit Slurm Job File menu action is hidden by default and dynamically toggled via HPC / Cluster settings opt-in checkbox. */
+    void testSlurmFileMenuOptInToggle();
 };
 

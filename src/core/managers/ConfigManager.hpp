@@ -49,6 +49,7 @@ struct HpcSettings {
   QString hostsFile = "";      ///< Path to MPI hostfile (empty = local execution).
   QString envVars = "";        ///< Newline-separated `KEY=VALUE` environment variables.
   bool strictAffinity = false; ///< Pass `--map-by node` to enforce strict node affinity.
+  bool enableSlurmMenu = false; ///< Opt-in toggle showing "Submit Slurm Job..." in the File menu.
 };
 
 /**
@@ -394,6 +395,9 @@ class ConfigManager {
   }
   static QString& s_gdbHistoryPathOverride() { static QString p; return p; }
 
+  /** @brief Registers a `QPointer`-guarded listener invoked whenever `hpc/enable_slurm_menu` changes. */
+  void registerSlurmMenuVisibilityListener(QObject* context, std::function<void(bool)> callback);
+
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 
@@ -412,6 +416,7 @@ class ConfigManager {
   std::vector<std::pair<QPointer<QObject>, std::function<void(const QStringList&)>>> m_toolbarLayoutListeners; ///< Live toolbar layout observers.
   std::vector<std::pair<QPointer<QObject>, std::function<void(const QString&)>>> m_searchPopupSizeListeners; ///< Live Search Everywhere size observers.
   std::vector<std::pair<QPointer<QObject>, std::function<void(bool)>>> m_menuBarWindowControlsListeners; ///< Live menu-bar window controls visibility observers.
+  std::vector<std::pair<QPointer<QObject>, std::function<void(bool)>>> m_slurmMenuVisibilityListeners; ///< Live File-menu Submit Slurm Job visibility observers.
 
   static constexpr const char* kOrg = "gridlock"; ///< QSettings organization identifier.
   static constexpr const char* kApp = "debugger"; ///< QSettings application identifier.

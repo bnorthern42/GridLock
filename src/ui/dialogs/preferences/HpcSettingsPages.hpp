@@ -7,6 +7,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QSpinBox>
@@ -29,6 +30,7 @@ public:
     QString hostsFile() const;
     QString envVars() const;
     bool strictAffinity() const;
+    bool enableSlurmMenu() const;
 
     void loadFromSettings();
 
@@ -36,6 +38,8 @@ private:
     QLineEdit* m_hostsFileEdit = nullptr;
     QTextEdit* m_envVarsEdit = nullptr;
     QCheckBox* m_strictAffinityBox = nullptr;
+    QCheckBox* m_enableSlurmMenuBox = nullptr;
+    QLabel* m_slurmWarningLabel = nullptr;
 };
 
 /**

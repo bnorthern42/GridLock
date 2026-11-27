@@ -71,6 +71,21 @@ HpcSettingsPage::HpcSettingsPage(QWidget* parent)
            "a separate physical node. Useful for NUMA-sensitive workloads."));
     form->addRow(tr("Strict Node Affinity:"), m_strictAffinityBox);
 
+    // Opt-in toggle for exposing the experimental Submit Slurm Job action in the File menu.
+    auto* slurmOptInLayout = new QVBoxLayout();
+    slurmOptInLayout->setContentsMargins(0, 0, 0, 0);
+    slurmOptInLayout->setSpacing(3);
+    m_enableSlurmMenuBox = new QCheckBox(tr("Show \"Submit Slurm Job...\" in File menu"), this);
+    m_enableSlurmMenuBox->setObjectName(QStringLiteral("enableSlurmMenuCheck"));
+    m_enableSlurmMenuBox->setChecked(false);
+    m_slurmWarningLabel = new QLabel(tr("Experimental, untested, not responsible for breakage"), this);
+    m_slurmWarningLabel->setObjectName(QStringLiteral("slurmExperimentalWarningLabel"));
+    m_slurmWarningLabel->setStyleSheet(QStringLiteral("color: #ff4d4f; font-weight: bold;"));
+    m_slurmWarningLabel->setWordWrap(true);
+    slurmOptInLayout->addWidget(m_enableSlurmMenuBox);
+    slurmOptInLayout->addWidget(m_slurmWarningLabel);
+    form->addRow(tr("Slurm Integration:"), slurmOptInLayout);
+
     addFormNote(this, form,
                 tr("<small style='color:#888;'>Changes are applied on the "
                    "<b>next</b> debug session launch.</small>"));
@@ -81,6 +96,7 @@ HpcSettingsPage::HpcSettingsPage(QWidget* parent)
 QString HpcSettingsPage::hostsFile() const { return m_hostsFileEdit->text().trimmed(); }
 QString HpcSettingsPage::envVars() const { return m_envVarsEdit->toPlainText().trimmed(); }
 bool HpcSettingsPage::strictAffinity() const { return m_strictAffinityBox->isChecked(); }
+bool HpcSettingsPage::enableSlurmMenu() const { return m_enableSlurmMenuBox && m_enableSlurmMenuBox->isChecked(); }
 
 /**
  * @brief Restores cluster settings from ConfigManager.
@@ -90,6 +106,7 @@ void HpcSettingsPage::loadFromSettings() {
     m_hostsFileEdit->setText(hs.hostsFile);
     m_envVarsEdit->setPlainText(hs.envVars);
     m_strictAffinityBox->setChecked(hs.strictAffinity);
+    if (m_enableSlurmMenuBox) m_enableSlurmMenuBox->setChecked(hs.enableSlurmMenu);
 }
 
 // ============================================================================

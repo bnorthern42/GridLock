@@ -277,7 +277,7 @@ void PreferencesDialog::apply() {
     ps.customGdbPath = m_debuggerPage->gdbPath().toStdString();
     cfg.saveProjectSettings(ps);
 
-    cfg.saveHpcSettings({m_hpcPage->hostsFile(), m_hpcPage->envVars(), m_hpcPage->strictAffinity()});
+    cfg.saveHpcSettings({m_hpcPage->hostsFile(), m_hpcPage->envVars(), m_hpcPage->strictAffinity(), m_hpcPage->enableSlurmMenu()});
     cfg.saveSshSettings({m_hpcIntegrationPage->sshHost(), m_hpcIntegrationPage->sshUser(), m_hpcIntegrationPage->sshKeyPath()});
     cfg.saveSlurmSettings({m_hpcIntegrationPage->slurmTemplate(), m_hpcIntegrationPage->slurmPartition(),
                            m_hpcIntegrationPage->slurmNodes(), m_hpcIntegrationPage->slurmTasks(),

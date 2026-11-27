@@ -83,6 +83,7 @@ HpcSettings ConfigManager::getHpcSettings() const {
   hs.hostsFile = s.value("hpc/hosts_file", "").toString();
   hs.envVars = s.value("hpc/env_vars", "").toString();
   hs.strictAffinity = s.value("hpc/strict_affinity", false).toBool();
+  hs.enableSlurmMenu = s.value("hpc/enable_slurm_menu", false).toBool();
   return hs;
 }
 
@@ -92,7 +93,18 @@ void ConfigManager::saveHpcSettings(const HpcSettings& hs) {
   s.setValue("hpc/hosts_file", hs.hostsFile);
   s.setValue("hpc/env_vars", hs.envVars);
   s.setValue("hpc/strict_affinity", hs.strictAffinity);
+  s.setValue("hpc/enable_slurm_menu", hs.enableSlurmMenu);
   s.sync();
+  auto it = m_slurmMenuVisibilityListeners.begin();
+  while (it != m_slurmMenuVisibilityListeners.end()) {
+    if (it->first.isNull()) {
+      it = m_slurmMenuVisibilityListeners.erase(it);
+    } else {
+      auto cb = it->second;
+      ++it;
+      if (cb) cb(hs.enableSlurmMenu);
+    }
+  }
 }
 
 // ─── SSH settings ────────────────────────────────────────────────────────────
@@ -418,6 +430,13 @@ void ConfigManager::registerMenuBarWindowControlsListener(
     QObject* context, std::function<void(bool)> callback) {
   if (!context || !callback) return;
   m_menuBarWindowControlsListeners.emplace_back(QPointer<QObject>(context), std::move(callback));
+}
+
+/** @brief Registers a `QPointer`-guarded callback invoked whenever `hpc/enable_slurm_menu` changes. */
+void ConfigManager::registerSlurmMenuVisibilityListener(
+    QObject* context, std::function<void(bool)> callback) {
+  if (!context || !callback) return;
+  m_slurmMenuVisibilityListeners.emplace_back(QPointer<QObject>(context), std::move(callback));
 }
 
 }  // namespace gridlock::core
