@@ -245,6 +245,8 @@ public:
     void executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd);
     /** @brief Attaches a backend coordinator instance. */
     void setCoordinator(IBackendCoordinator* coord);
+    /** @brief Exports a sanitized GDB/MI session trace (prompts via save dialog when @p explicitPath is empty). */
+    bool exportSanitizedMiTrace(const QString& explicitPath = QString());
     /** @brief Instantiates or switches `m_coordinator` to match `ConfigManager::debuggerEngine()`. */
     void syncCoordinatorWithConfig();
     /** @brief Renders the entire workspace offscreen to an image file. */

@@ -142,6 +142,11 @@ void MainWindow::executeCommand(std::unique_ptr<gridlock::core::commands::IDebug
 void MainWindow::setCoordinator(IBackendCoordinator* coord) {
     if (m_deadlockAnalyzer) { delete m_deadlockAnalyzer; m_deadlockAnalyzer = nullptr; }
     m_coordinator = coord;
+    if (m_coordinator) {
+        connect(m_coordinator, &QObject::destroyed, this, [this, coord](QObject*) {
+            if (m_coordinator == coord) m_coordinator = nullptr;
+        });
+    }
     if (!m_coordinator) m_debugSessionActive = false;
     else if (m_coordinator->getProcessCount() > 0) m_debugSessionActive = true;
     if (!m_isShuttingDown && !m_isClosing) { updateDebugToolbarState(); syncExecutionScopeUi(); }

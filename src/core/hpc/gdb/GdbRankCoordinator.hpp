@@ -26,6 +26,7 @@
 #include <QString>
 
 #include "../../../RankState.hpp"
+#include "GdbMiTranscriptRecorder.hpp"
 #include "../IBackendCoordinator.hpp"
 #include "../system/ProcessScanner.hpp"
 
@@ -54,6 +55,16 @@ class GdbRankCoordinator : public IBackendCoordinator {
       const QStringList& systemOpenMpiLibCandidates = {
           QStringLiteral("/usr/lib64/openmpi/lib"),
           QStringLiteral("/usr/lib/openmpi/lib")});
+
+  /** @brief Returns the bounded GDB/MI session transcript recorder. */
+  core::GdbMiTranscriptRecorder& miTranscriptRecorder() noexcept { return m_miTranscript; }
+  const core::GdbMiTranscriptRecorder& miTranscriptRecorder() const noexcept { return m_miTranscript; }
+  /** @brief Exports the current session's sanitized GDB/MI trace text. */
+  QString exportSanitizedMiTrace() const { return m_miTranscript.exportSanitizedTranscript(); }
+  /** @brief Writes the current session's sanitized GDB/MI trace to @p filePath. */
+  bool exportSanitizedMiTraceToFile(const QString& filePath, QString* outError = nullptr) const {
+    return m_miTranscript.exportToFile(filePath, outError);
+  }
 
   void writeMemory(int rankId, uint64_t address, const QByteArray& data) override {
     if (!data.isEmpty())
@@ -396,6 +407,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QMap<int, QVector<ProcessCheckpoint>> m_rankCheckpoints;
   QMap<QString, QHash<int, QString>> m_archRegisterNames;
   QMap<int, SourceLanguage> m_rankLanguage;
+  core::GdbMiTranscriptRecorder m_miTranscript;
 };
 
 inline void GdbRankCoordinator::startDebugSession(int rankCount, const QString& executable) {

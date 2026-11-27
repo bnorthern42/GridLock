@@ -77,6 +77,9 @@ class PluginManager : public QObject {
   Q_OBJECT
 
  public:
+  /** @brief Upper bound on accepted `GridLockPluginDescriptor::struct_size` for ABI v1.x forward compatibility. */
+  static constexpr uint32_t kMaxSupportedPluginDescriptorSize =
+      static_cast<uint32_t>(sizeof(GridLockPluginDescriptor)) + 256u;
   /**
    * @brief Constructs a `PluginManager` owning a `PluginHostBridge` for @p coordinator.
    * @param coordinator Optional `GdbRankCoordinator` bound to the host bridge.

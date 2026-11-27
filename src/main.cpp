@@ -413,7 +413,11 @@ int main(int argc, char* argv[]) {
   }
 
   // Guarantee clean background worker, pipe, and clangd teardown while QApplication is still alive.
-  QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
+  const QString cliExportMiTracePath = parser.exportMiTracePath().trimmed();
+  QObject::connect(&app, &QCoreApplication::aboutToQuit, [&window, cliExportMiTracePath]() {
+    if (!cliExportMiTracePath.isEmpty()) {
+      (void)window.exportSanitizedMiTrace(cliExportMiTracePath);
+    }
     gridlock::core::ClangdLspClient::instance().shutdown();
     QThreadPool::globalInstance()->waitForDone(500);
     if (g_signalPipeFds[0] >= 0) { ::close(g_signalPipeFds[0]); g_signalPipeFds[0] = -1; }

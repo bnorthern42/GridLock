@@ -113,14 +113,14 @@ Baseline inventory across `src/`, `include/`, and `tests/` (`agent.md` ceiling: 
 
 ### 3.4 C ABI Plugin Surface (`include/gridlock/plugin_api.h` & `src/core/plugins/`)
 
-- [ ] **Guard all host-to-plugin ABI calls with `try/catch` boundaries**:
-  - Wrap `gridlock_plugin_init_v1`, `on_session_start`, `on_rank_stopped`, `on_session_end`, `on_theme_changed`, and `shutdown` invocations in `src/core/plugins/PluginManager.cpp:477,483,536,540` with `try { ... } catch (...)` so a third-party C++ plugin that forgets `noexcept` cannot abort the GridLock process.
-- [ ] **Tighten `GridLockPluginDescriptor` validation**:
-  - In `src/core/plugins/PluginManager.cpp:479`, validate `desc.struct_size <= sizeof(GridLockPluginDescriptor)` (or a bounded ABI-minor ceiling), reject nonzero `desc.reserved_flags`, and verify `desc.reserved[]` slots are zero-initialized.
-- [ ] **Guarantee per-plugin `alloc_bytes` reclamation on failed init and unload**:
-  - When `gridlock_plugin_init_v1` returns a non-`GRIDLOCK_OK` status (`PluginManager.cpp:498`) or when a plugin exits `shutdown()` with `liveAllocCount > 0`, track allocation pointers per `PluginBindingContext` and automatically free any leaked host blocks after `shutdown()` (logging a warning) so repeated hot-reloads never leak host heap memory.
-- [ ] **Preserve existing ABI strengths**:
-  - Keep the 16-byte versioned header layout locks (`tests/core/test_plugin_abi.cpp`), pre-`dlopen` workspace SHA-256 trust gating, `ScopedCallbackDepth` re-entrancy deferral, and Linux `STB_GNU_UNIQUE` (`hasGnuUniqueSymbols`) hot-reload safety banner intact.
+- [x] **Guard all host-to-plugin ABI calls with `try/catch` boundaries**:
+  - Wrapped `gridlock_plugin_init_v1`, `on_session_start`, `on_rank_stopped`, `on_session_end`, `on_theme_changed`, and `shutdown` invocations in `src/core/plugins/PluginManager.cpp` with `try { ... } catch (const std::exception& e) ... catch (...)` boundaries so exceptions from third-party C++ plugins never propagate across `extern "C"` frames.
+- [x] **Tighten `GridLockPluginDescriptor` validation**:
+  - `src/core/plugins/PluginManager.cpp` enforces `sizeof(GridLockPluginDescriptor) <= desc.struct_size <= kMaxSupportedPluginDescriptorSize` (`+256` bytes) and `desc.reserved_flags == 0`, rejecting malformed descriptors cleanly and unloading the shared library.
+- [x] **Guarantee per-plugin `alloc_bytes` reclamation on failed init and unload**:
+  - Tracked active host-allocated pointers per `PluginBindingContext` inside `PluginHostBridge` (`src/core/plugins/PluginHostBridge.hpp`) and wired `PluginHostBridge::reclaimPluginAllocations(...)` into both `teardownUncommitted` (failed/throwing init) and `shutdownAndUnloadHandle` (unload/hot-reload).
+- [x] **Preserve existing ABI strengths & add sanitized GDB/MI trace export**:
+  - Preserved the 16-byte versioned header layout locks (`tests/core/test_plugin_abi.cpp`), pre-`dlopen` workspace SHA-256 trust gating, `ScopedCallbackDepth` re-entrancy deferral, and Linux `STB_GNU_UNIQUE` hot-reload banner, and added `GdbMiTranscriptRecorder` (`src/core/hpc/gdb/GdbMiTranscriptRecorder.hpp`), **Tools -> Export Sanitized GDB/MI Trace...**, and `--export-mi-trace <file>` for deterministic cluster bug reproduction.
 
 ### 3.5 `meson.build`, Qt6 Modules & HPC Cluster Packaging
 

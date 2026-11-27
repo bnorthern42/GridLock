@@ -43,6 +43,7 @@ CliParser::CliParser()
     , m_headlessOption("headless", "Run using the offscreen platform without mapping a visible desktop window")
     , m_snapshotOption("snapshot", "Render the main window workspace and save a PNG snapshot to <file>, then exit.", "file")
     , m_verifyPluginOption("verify-plugin", "Verify a compiled C99 ABI plugin shared library in an isolated sandbox and exit.", "path")
+    , m_exportMiTraceOption("export-mi-trace", "Export a sanitized GDB/MI session trace to <file> on exit.", "file")
 {
     // Configure the CLI help banner with the current semantic version string.
     m_parser.setApplicationDescription(
@@ -61,6 +62,7 @@ CliParser::CliParser()
     m_parser.addOption(m_headlessOption);
     m_parser.addOption(m_snapshotOption);
     m_parser.addOption(m_verifyPluginOption);
+    m_parser.addOption(m_exportMiTraceOption);
 }
 
 /** @brief Synchronizes `m_options` after `m_parser.parse()` or `m_parser.process()`. */
@@ -75,6 +77,7 @@ void CliParser::syncParsedOptions(const QStringList& explicitProgramArgs, bool h
     m_options.headless = isHeadless();
     m_options.snapshotPath = snapshotFilePath();
     m_options.verifyPluginPath = verifyPluginPath();
+    m_options.exportMiTracePath = exportMiTracePath();
 }
 
 /**
@@ -120,6 +123,9 @@ QString CliParser::snapshotFilePath() const { return m_parser.value(m_snapshotOp
 
 /** @brief Returns the plugin binary path passed to `--verify-plugin <path>`. */
 QString CliParser::verifyPluginPath() const { return m_parser.value(m_verifyPluginOption); }
+
+/** @brief Returns the output file path passed to `--export-mi-trace <file>`. */
+QString CliParser::exportMiTracePath() const { return m_parser.value(m_exportMiTraceOption); }
 
 /**
  * @brief Inspects raw `argv` prior to `QApplication` creation for `--headless`, `--snapshot`, or `--verify-plugin`.

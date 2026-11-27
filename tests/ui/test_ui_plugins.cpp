@@ -3,6 +3,8 @@
  * @brief UI integration tests for Preferences -> Plugins, nested menus, status items, 5 context surfaces, annotations, themes, and report dock.
  */
 
+#include "test_ui.hpp"
+
 #include <memory>
 
 #include <QAction>
@@ -649,4 +651,100 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   mw.setCoordinator(nullptr);
   pd3.reject();
   mw.pluginManager()->unloadAll();
+}
+
+void TestMainWindowUI::testPluginAbiFirewallReclaimAndMiTraceExport() {
+#ifdef __linux__
+  QTemporaryDir sandbox;
+  QVERIFY(sandbox.isValid());
+  auto compilePlug = [&](const QString& stem, const QByteArray& cppBody) -> QString {
+    const QString src = sandbox.filePath(stem + QStringLiteral(".cpp"));
+    const QString so = sandbox.filePath(QStringLiteral("lib") + stem + QStringLiteral(".so"));
+    QFile f(src);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text) || f.write(cppBody) < 0) return {};
+    f.close();
+    QProcess gpp;
+    gpp.start(QStringLiteral("g++"), {QStringLiteral("-std=c++23"), QStringLiteral("-shared"), QStringLiteral("-fPIC"),
+                                      QStringLiteral("-I") + QStringLiteral(GRIDLOCK_TEST_INCLUDE_DIR),
+                                      src, QStringLiteral("-o"), so});
+    return (gpp.waitForFinished(10000) && gpp.exitCode() == 0) ? so : QString();
+  };
+
+  gridlock::core::plugins::PluginManager pm;
+
+  // 1. Oversized struct_size rejected cleanly.
+  const QString bigSo = compilePlug(QStringLiteral("oversized_desc"),
+      "#include \"gridlock/plugin_api.h\"\n"
+      "extern \"C\" GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL "
+      "gridlock_plugin_init_v1(const GridLockHostApi*, GridLockPluginDescriptor* d) {\n"
+      "  d->struct_size = sizeof(GridLockPluginDescriptor) + 512u; d->abi_major = 1u; d->abi_minor = 0u;\n"
+      "  d->plugin_id_utf8 = \"org.test.big\"; d->plugin_name_utf8 = \"Big\"; return GRIDLOCK_OK;\n}\n");
+  QVERIFY(!bigSo.isEmpty());
+  QVERIFY(!pm.loadPluginFromPath(bigSo));
+  QVERIFY(pm.plugins().last().errorMessage.contains(QStringLiteral("struct_size")));
+
+  // 2. Non-zero reserved_flags rejected cleanly.
+  const QString flagsSo = compilePlug(QStringLiteral("bad_flags"),
+      "#include \"gridlock/plugin_api.h\"\n"
+      "extern \"C\" GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL "
+      "gridlock_plugin_init_v1(const GridLockHostApi*, GridLockPluginDescriptor* d) {\n"
+      "  d->struct_size = sizeof(GridLockPluginDescriptor); d->abi_major = 1u; d->abi_minor = 0u;\n"
+      "  d->reserved_flags = 1u; d->plugin_id_utf8 = \"org.test.flags\"; d->plugin_name_utf8 = \"Flags\"; return GRIDLOCK_OK;\n}\n");
+  QVERIFY(!flagsSo.isEmpty());
+  QVERIFY(!pm.loadPluginFromPath(flagsSo));
+  QVERIFY(pm.plugins().last().errorMessage.contains(QStringLiteral("reserved_flags")));
+
+  // 3. Throwing init + leaked alloc_bytes: caught by firewall and leaked block auto-reclaimed.
+  const QString throwInitSo = compilePlug(QStringLiteral("throw_init"),
+      "#include \"gridlock/plugin_api.h\"\n#include <stdexcept>\n"
+      "extern \"C\" GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL "
+      "gridlock_plugin_init_v1(const GridLockHostApi* h, GridLockPluginDescriptor*) {\n"
+      "  (void)h->alloc_bytes(h->host_ctx, 128u);\n"
+      "  throw std::runtime_error(\"boom_in_init\");\n}\n");
+  QVERIFY(!throwInitSo.isEmpty());
+  QVERIFY(!pm.loadPluginFromPath(throwInitSo));
+  QVERIFY(pm.plugins().last().errorMessage.contains(QStringLiteral("boom_in_init")));
+  QCOMPARE(pm.hostBridge()->liveAllocationCount(), 0);
+
+  // 4. Throwing lifecycle callbacks + leaked alloc_bytes reclaimed automatically on unloadAll().
+  const QString throwCbSo = compilePlug(QStringLiteral("throw_callbacks"),
+      "#include \"gridlock/plugin_api.h\"\n#include <stdexcept>\n"
+      "static GridLockStatus GRIDLOCK_CALL onStart(void*, const GridLockHostApi*, int32_t) { throw std::runtime_error(\"start_boom\"); }\n"
+      "static GridLockStatus GRIDLOCK_CALL onStop(void*, const GridLockHostApi*, const GridLockStopInfo*) { throw std::runtime_error(\"stop_boom\"); }\n"
+      "static GridLockStatus GRIDLOCK_CALL onEnd(void*, const GridLockHostApi*) { throw std::runtime_error(\"end_boom\"); }\n"
+      "static void GRIDLOCK_CALL onShutdown(void*, const GridLockHostApi*) { throw std::runtime_error(\"shut_boom\"); }\n"
+      "extern \"C\" GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL "
+      "gridlock_plugin_init_v1(const GridLockHostApi* h, GridLockPluginDescriptor* d) {\n"
+      "  (void)h->alloc_bytes(h->host_ctx, 64u);\n"
+      "  d->struct_size = sizeof(GridLockPluginDescriptor); d->abi_major = 1u; d->abi_minor = 0u;\n"
+      "  d->plugin_id_utf8 = \"org.test.throw_cb\"; d->plugin_name_utf8 = \"ThrowCb\"; d->plugin_version_utf8 = \"1.0.0\";\n"
+      "  d->on_session_start = &onStart; d->on_rank_stopped = &onStop; d->on_session_end = &onEnd; d->shutdown = &onShutdown;\n"
+      "  return GRIDLOCK_OK;\n}\n");
+  QVERIFY(!throwCbSo.isEmpty());
+  QVERIFY(pm.loadPluginFromPath(throwCbSo));
+  QCOMPARE(pm.hostBridge()->liveAllocationCount(), 1);
+  pm.notifySessionStarted(2);
+  pm.notifyRankStopped(0, QStringLiteral("/tmp/a.cpp"), 10);
+  pm.notifySessionEnded();
+  pm.unloadAll();
+  QCOMPARE(pm.hostBridge()->liveAllocationCount(), 0);
+
+  // 5. MainWindow Tools -> Export Sanitized GDB/MI Trace action and exportSanitizedMiTrace().
+  gridlock::ui::MainWindow mw;
+  auto* exportAct = mw.findChild<QAction*>(QStringLiteral("actionExportSanitizedMiTrace"));
+  QVERIFY(exportAct != nullptr);
+  gridlock::GdbRankCoordinator coord;
+  coord.initializeMockSession(1, false);
+  coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401000\",fullname=\"/home/alice/app.cpp\",line=\"7\"}\n"));
+  mw.setCoordinator(&coord);
+  const QString traceFile = sandbox.filePath(QStringLiteral("ui_export.mi.log"));
+  QVERIFY(mw.exportSanitizedMiTrace(traceFile));
+  QFile tf(traceFile);
+  QVERIFY(tf.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString text = QString::fromUtf8(tf.readAll());
+  QVERIFY(text.contains(QStringLiteral("# GridLock Sanitized GDB/MI Session Trace")));
+  QVERIFY(text.contains(QStringLiteral("/home/<USER>/app.cpp")));
+  QVERIFY(!text.contains(QStringLiteral("alice")));
+  mw.setCoordinator(nullptr);
+#endif
 }

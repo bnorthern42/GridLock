@@ -231,5 +231,8 @@ private slots:
 
     /** @brief Verifies GdbRankCoordinator::resolveMpiLdLibraryPath preserves user MPI stacks and LocalSlurmBackend destructor cancels active jobs non-blockingly. */
     void testMpiLdLibraryPathAndSlurmDestructorCancel();
+
+    /** @brief Verifies C ABI plugin descriptor bounds, exception firewall, leaked alloc_bytes auto-reclaim, and sanitized MI trace UI export. */
+    void testPluginAbiFirewallReclaimAndMiTraceExport();
 };
 

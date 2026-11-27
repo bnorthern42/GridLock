@@ -217,6 +217,7 @@ bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
   if (pids.isEmpty()) return false;
   for (qint64 pid : pids) if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
   terminateAllSessions();
+  m_miTranscript.setMpiLauncherMode(QStringLiteral("attach-pid"));
   const ResolvedGdbBinary resolved = resolveEffectiveGdbLaunch();
   if (resolved.executablePath.isEmpty()) return false;
   QProcessEnvironment procEnv = QProcessEnvironment::systemEnvironment();
@@ -246,6 +247,7 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
   if (targets.isEmpty()) return false;
   for (const RemoteTargetSpec& t : targets) if (t.endpoint.trimmed().isEmpty()) return false;
   terminateAllSessions();
+  m_miTranscript.setMpiLauncherMode(QStringLiteral("remote-gdbserver"));
   m_currentBinaryPath = targets.first().localSymbolBinary.trimmed();
   for (int r = 0; r < targets.size(); ++r) {
     const RemoteTargetSpec& t = targets[r];
@@ -332,16 +334,22 @@ void GdbRankCoordinator::writeCmd(int rankId, const QString& cmd) {
       }
       break;
     }
-    if (remaining == 0u && !bytes.isEmpty()) emit commandSentToGdb(rankId, cmd.trimmed());
+    if (remaining == 0u && !bytes.isEmpty()) {
+      m_miTranscript.record(rankId, true, trimmedCmd);
+      emit commandSentToGdb(rankId, trimmedCmd);
+    }
     return;
   }
   if (rp->process) {
     if (rp->process->state() == QProcess::Starting) rp->process->waitForStarted(1000);
     if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable()) {
-      rp->process->write(cmd.toUtf8()); emit commandSentToGdb(rankId, cmd.trimmed());
+      rp->process->write(cmd.toUtf8());
+      m_miTranscript.record(rankId, true, trimmedCmd);
+      emit commandSentToGdb(rankId, trimmedCmd);
     }
   } else {
-    emit commandSentToGdb(rankId, cmd.trimmed());
+    m_miTranscript.record(rankId, true, trimmedCmd);
+    emit commandSentToGdb(rankId, trimmedCmd);
   }
 }
 
@@ -538,6 +546,7 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
   };
 
   if (mpiBin.isEmpty()) {
+    m_miTranscript.setMpiLauncherMode(QStringLiteral("single-rank"));
     auto rp = std::make_unique<RankProcess>();
     rp->id = 0; rp->process = std::make_unique<QProcess>(); rp->state.rankId = 0;
     rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced"; rp->process->setProcessEnvironment(env);
@@ -575,6 +584,7 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     if (!splitExecArgs.isEmpty()) mpiArgs << QStringLiteral("--args") << executable << splitExecArgs; else mpiArgs << executable;
   }
   m_mpirunProcess = std::make_unique<QProcess>();
+  m_miTranscript.setMpiLauncherMode(QStringLiteral("mpi:%1 (ranks=%2)").arg(QFileInfo(mpiBin).fileName()).arg(rankCount));
   if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) m_mpirunProcess->setWorkingDirectory(workDir);
   m_mpirunProcess->setProcessEnvironment(env);
   connect(m_mpirunProcess.get(), &QProcess::readyReadStandardOutput, this, [this]() { emit targetOutputReceived("stdout", QString::fromUtf8(m_mpirunProcess->readAllStandardOutput())); });

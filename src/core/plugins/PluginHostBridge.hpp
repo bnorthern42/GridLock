@@ -16,6 +16,8 @@
 #include <cstdlib>
 #include <functional>
 #include <mutex>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <QByteArray>
 #include <QHash>
@@ -239,6 +241,31 @@ class PluginHostBridge : public QObject {
   }
   int32_t liveAllocationCount() const noexcept { return m_liveAllocations.load(std::memory_order_relaxed); }
 
+  /** @brief Reclaims any unfreed `alloc_bytes` blocks tracked under @p ctx and returns the reclaimed count. */
+  size_t reclaimPluginAllocations(PluginBindingContext* ctx) noexcept {
+    if (ctx == nullptr) return 0u;
+    try {
+      std::unordered_set<void*> leaked;
+      {
+        std::lock_guard<std::mutex> lock(m_allocMutex);
+        auto it = m_ownedAllocs.find(ctx);
+        if (it != m_ownedAllocs.end()) {
+          leaked.swap(it->second);
+          m_ownedAllocs.erase(it);
+        }
+      }
+      for (void* ptr : leaked) {
+        std::free(ptr);
+      }
+      if (!leaked.empty()) {
+        m_liveAllocations.fetch_sub(static_cast<int32_t>(leaked.size()), std::memory_order_relaxed);
+      }
+      return leaked.size();
+    } catch (...) {
+      return 0u;
+    }
+  }
+
   void beginInitStaging() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_stagingActive = true;
@@ -330,7 +357,13 @@ class PluginHostBridge : public QObject {
       auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
       if (ctx == nullptr || ctx->bridge == nullptr || numBytes == 0u) return nullptr;
       void* mem = std::malloc(numBytes);
-      if (mem != nullptr) ctx->bridge->m_liveAllocations.fetch_add(1, std::memory_order_relaxed);
+      if (mem != nullptr) {
+        {
+          std::lock_guard<std::mutex> lock(ctx->bridge->m_allocMutex);
+          ctx->bridge->m_ownedAllocs[ctx].insert(mem);
+        }
+        ctx->bridge->m_liveAllocations.fetch_add(1, std::memory_order_relaxed);
+      }
       return mem;
     } catch (...) {
       return nullptr;
@@ -341,8 +374,19 @@ class PluginHostBridge : public QObject {
     try {
       auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
       if (ctx != nullptr && ctx->bridge != nullptr && ptr != nullptr) {
-        ctx->bridge->m_liveAllocations.fetch_sub(1, std::memory_order_relaxed);
-        std::free(ptr);
+        bool owned = false;
+        {
+          std::lock_guard<std::mutex> lock(ctx->bridge->m_allocMutex);
+          auto it = ctx->bridge->m_ownedAllocs.find(ctx);
+          if (it != ctx->bridge->m_ownedAllocs.end() && it->second.erase(ptr) > 0u) {
+            owned = true;
+            if (it->second.empty()) ctx->bridge->m_ownedAllocs.erase(it);
+          }
+        }
+        if (owned) {
+          ctx->bridge->m_liveAllocations.fetch_sub(1, std::memory_order_relaxed);
+          std::free(ptr);
+        }
       }
     } catch (...) {
     }
@@ -444,6 +488,8 @@ class PluginHostBridge : public QObject {
   int32_t m_nextBreakpointId = 1;
   bool m_stagingActive = false;
   std::atomic<int32_t> m_liveAllocations{0};
+  std::mutex m_allocMutex;
+  std::unordered_map<const PluginBindingContext*, std::unordered_set<void*>> m_ownedAllocs;
   CachedPromptReply m_cachedPrompt;
   QVector<RegisteredVariableAction> m_variableActions;
   QVector<RegisteredCommandAction> m_commandActions;

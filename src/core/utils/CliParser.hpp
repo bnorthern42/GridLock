@@ -34,6 +34,7 @@ struct CliOptions {
     bool headless = false;    ///< True when `--headless`, `--snapshot`, or `--verify-plugin` is set.
     QString snapshotPath;     ///< Output PNG path when `--snapshot <file>` is set.
     QString verifyPluginPath; ///< Plugin shared library path when `--verify-plugin <path>` is set.
+    QString exportMiTracePath;///< Output file path when `--export-mi-trace <file>` is set.
 };
 
 /**
@@ -78,6 +79,9 @@ public:
     /** @brief Returns the plugin shared library path supplied to `--verify-plugin`, or empty if unset. */
     QString verifyPluginPath() const;
 
+    /** @brief Returns the output file path supplied to `--export-mi-trace`, or empty if unset. */
+    QString exportMiTracePath() const;
+
     /** @brief Returns the positional binary, source file, or workspace directory path. */
     QString targetPath() const;
 
@@ -111,6 +115,7 @@ private:
     QCommandLineOption m_headlessOption;
     QCommandLineOption m_snapshotOption;
     QCommandLineOption m_verifyPluginOption;
+    QCommandLineOption m_exportMiTraceOption;
     CliOptions m_options;
 };
 

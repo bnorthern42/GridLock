@@ -124,6 +124,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
     const QString line = rp->buffer.left(newlineIdx).trimmed();
     rp->buffer.remove(0, newlineIdx + 1);
     if (line.isEmpty()) continue;
+    m_miTranscript.record(rankId, false, line);
     emit gdbOutputReceived(rankId, line);
 
     const int caretPos = line[0].isDigit() ? line.indexOf(QLatin1Char('^')) : -1;

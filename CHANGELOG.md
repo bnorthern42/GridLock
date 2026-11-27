@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Sanitized GDB/MI Session Trace Recorder & Export (`GdbMiTranscriptRecorder`, `GdbRankCoordinator`, `MainWindow`, `CliParser`, `main.cpp`, `tests/hpc/test_mi_parser.cpp`, `tests/ui/test_ui_plugins.cpp`)**:
+  - Added a thread-safe bounded ring buffer (`4,096` lines / `2 MiB`) recording timestamped `[rank N] ->` / `[rank N] <-` GDB/MI traffic alongside GridLock, Qt, GDB, and MPI launcher metadata, with a deterministic sanitizer that redacts home/work/scratch user directories, usernames, hostnames, and `-gdb-set environment` values while preserving exact MI syntax for unit-test fixtures.
+  - Added **Tools -> Export Sanitized GDB/MI Trace...** in `MainWindow` and `--export-mi-trace <file>` on the CLI.
 - **Hybrid MPI + OpenMP Fortran Debugging Tutorial & Example (`docs/Tutorial-Fortran-OpenMP.md`, `tutorial/stencil_omp.f90`, `meson.build`, `MainWindow`, `SearchEverywhereEngine`)**:
   - Added a runnable 2D `4 x 6` column-major Fortran MPI + OpenMP stencil example (`gfortran` / `ifx`) in `tutorial/stencil_omp.f90` with an optional Meson `stencil_omp_bin` target, in-app `TARGET:` / Search Everywhere registration, coordinate-encoded state (`rank * 1000 + j * 100 + i`), and a complete tutorial covering multi-rank + OpenMP thread navigation, `set scheduler-locking on/off`, 1-based Fortran slices, and column-major `ArrayPlotDialog` inspection.
 - **Fortran (`gfortran` / `ifx`) Frame Detection, 1-Based Slicing & Column-Major Inspection (`LanguageExpressionHelper`, `GdbRankCoordinator`, `GdbMiParser`, `GdbRankInspection`, `ArrayPlotDialog`, `ArrayPlotCanvas`, `TensorSliceTableModel`, `PluginHostBridge`)**:
@@ -21,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added the `-Dsvg=auto|enabled|disabled` Meson feature option gating `Qt6::Svg` (`GRIDLOCK_HAS_QT_SVG`) with a clean PNG-only fallback in `PointerGraphDialog`, resolved the `Qt-Advanced-Stylesheets` Meson sandbox include warning, and made the `mpicc`/`mpicxx` tutorial targets optional (`required: false`).
 
 ### Fixed
+- **C ABI Plugin Exception Firewall, Descriptor Validation & Allocation Reclamation (`PluginManager`, `PluginHostBridge`, `tests/ui/test_ui_plugins.cpp`)**:
+  - Wrapped `gridlock_plugin_init_v1`, `on_session_start`, `on_rank_stopped`, `on_session_end`, `on_theme_changed`, and `shutdown` invocations in `try/catch` boundaries so C++ exceptions inside third-party `.so` plugins never unwind across C ABI frames.
+  - Enforced bounded `GridLockPluginDescriptor::struct_size` (`sizeof(GridLockPluginDescriptor)` to `+256` bytes) and `reserved_flags == 0` checks at registration, and tracked per-plugin `alloc_bytes` blocks in `PluginHostBridge` to automatically reclaim leaked host allocations on failed initialization, unload, or reload.
 - **Bounded JSON-RPC Framing, `compile_commands.json` Discovery & Opt-In DAP Tracing (`JsonRpcFramer`, `ClangdLspScopeAnalyzer`, `LspCoordinator`, `ClangdLspClient`, `DapCoordinator`, `tests/hpc/test_lsp.cpp`, `tests/dap/test_dap_parser.cpp`)**:
   - Added a shared bounded `JsonRpcFramer` (`16 MiB` max frame payload, `32 MiB` max rolling receive buffer, `16 KiB` header cap) wired into `LspCoordinator`, `ClangdLspClient`, and `DapCoordinator`, advancing cleanly past `Content-Length: 0` headers without deadlocking and rejecting malformed or oversized frames without unbounded memory growth.
   - Replaced hardcoded `--compile-commands-dir=build` in `LspCoordinator` with `setCompileCommandsDir(...)` and automatic `compile_commands.json` discovery across `builddir/`, `build/`, and workspace root (omitting the flag when absent), and extracted `ClangdLspScopeAnalyzer.hpp` to bring `ClangdLspClient.cpp` below the 800-line ceiling.

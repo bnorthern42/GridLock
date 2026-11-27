@@ -21,9 +21,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <utility>
 
 #include <QCryptographicHash>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -474,13 +476,42 @@ bool PluginManager::loadPluginInternal(const QString& libraryPath, PluginScope s
 
   m_bridge.beginInitStaging();
   GridLockStatus status = GRIDLOCK_ERR_UNSUPPORTED;
-  { ScopedCallbackDepth guard(this); status = reinterpret_cast<GridLockPluginInitV1Fn>(rawSym)(pluginApi.get(), &desc); }
+  QString initExceptionMsg;
+  {
+    ScopedCallbackDepth guard(this);
+    try {
+      status = reinterpret_cast<GridLockPluginInitV1Fn>(rawSym)(pluginApi.get(), &desc);
+    } catch (const std::exception& e) {
+      initExceptionMsg = QStringLiteral("Uncaught std::exception in gridlock_plugin_init_v1: %1")
+                             .arg(QString::fromUtf8(e.what()));
+    } catch (...) {
+      initExceptionMsg = QStringLiteral("Uncaught non-standard exception in gridlock_plugin_init_v1");
+    }
+  }
   const bool abiMajorOk = (desc.abi_major == GRIDLOCK_PLUGIN_ABI_MAJOR);
-  const bool structSizeOk = (desc.struct_size >= offsetof(GridLockPluginDescriptor, reserved));
+  const bool structSizeOk = (desc.struct_size >= static_cast<uint32_t>(sizeof(GridLockPluginDescriptor)) &&
+                             desc.struct_size <= kMaxSupportedPluginDescriptorSize);
+  const bool reservedFlagsOk = (desc.reserved_flags == 0u);
 
   auto teardownUncommitted = [&](bool canInvokeShutdown) {
     bindingCtx->shuttingDown.store(true, std::memory_order_release);
-    if (canInvokeShutdown && desc.shutdown != nullptr) { ScopedCallbackDepth guard(this); desc.shutdown(desc.plugin_ctx, pluginApi.get()); }
+    if (canInvokeShutdown && desc.shutdown != nullptr) {
+      ScopedCallbackDepth guard(this);
+      try {
+        desc.shutdown(desc.plugin_ctx, pluginApi.get());
+      } catch (const std::exception& e) {
+        qWarning() << "[Plugins] Exception in plugin shutdown:" << e.what();
+      } catch (...) {
+        qWarning() << "[Plugins] Unknown exception in plugin shutdown";
+      }
+    }
+    if (const size_t reclaimed = m_bridge.reclaimPluginAllocations(bindingCtx.get()); reclaimed > 0u) {
+      const QString msg = QStringLiteral("Reclaimed %1 leaked host allocation(s) from plugin '%2'")
+                              .arg(reclaimed)
+                              .arg(bindingCtx->pluginId);
+      qWarning() << "[Plugins]" << msg;
+      emit m_bridge.pluginLogReceived(bindingCtx->pluginId, GRIDLOCK_LOG_WARN, msg);
+    }
     m_bridge.discardStagedActions(); lib->unload();
   };
   auto rejectPlugin = [&](const QString& reason, bool canInvokeShutdown) {
@@ -495,9 +526,11 @@ bool PluginManager::loadPluginInternal(const QString& libraryPath, PluginScope s
     return false;
   };
 
+  if (!initExceptionMsg.isEmpty()) return rejectPlugin(initExceptionMsg, false);
   if (status != GRIDLOCK_OK) return rejectPlugin(QStringLiteral("gridlock_plugin_init_v1 failed with status %1").arg(status), false);
   if (!abiMajorOk) return rejectPlugin(QStringLiteral("ABI major mismatch: plugin reported v%1.%2, host requires v%3.x").arg(desc.abi_major).arg(desc.abi_minor).arg(GRIDLOCK_PLUGIN_ABI_MAJOR), false);
-  if (!structSizeOk) return rejectPlugin(QStringLiteral("Invalid GridLockPluginDescriptor struct_size (%1 bytes)").arg(desc.struct_size), false);
+  if (!structSizeOk) return rejectPlugin(QStringLiteral("Invalid GridLockPluginDescriptor struct_size (%1 bytes; expected %2..%3)").arg(desc.struct_size).arg(sizeof(GridLockPluginDescriptor)).arg(kMaxSupportedPluginDescriptorSize), false);
+  if (!reservedFlagsOk) return rejectPlugin(QStringLiteral("Invalid GridLockPluginDescriptor reserved_flags (0x%1; must be 0)").arg(desc.reserved_flags, 0, 16), false);
 
   const QString pluginId = safeUtf8(desc.plugin_id_utf8), pluginName = safeUtf8(desc.plugin_name_utf8);
   if (pluginId.isEmpty() || pluginName.isEmpty()) return rejectPlugin(QStringLiteral("Plugin descriptor must provide non-empty UTF-8 id and name"), true);
@@ -533,11 +566,30 @@ void PluginManager::shutdownAndUnloadHandle(ActivePluginHandle& handle) {
   const GridLockHostApi* api = handle.hostApi ? handle.hostApi.get() : m_bridge.hostApi();
   if (m_sessionActive && handle.descriptor.on_session_end != nullptr) {
     ScopedCallbackDepth guard(this);
-    (void)handle.descriptor.on_session_end(handle.descriptor.plugin_ctx, api);
+    try {
+      (void)handle.descriptor.on_session_end(handle.descriptor.plugin_ctx, api);
+    } catch (const std::exception& e) {
+      qWarning() << "[Plugins] Exception in on_session_end for" << handle.id << ":" << e.what();
+    } catch (...) {
+      qWarning() << "[Plugins] Unknown exception in on_session_end for" << handle.id;
+    }
   }
   if (handle.descriptor.shutdown != nullptr) {
     ScopedCallbackDepth guard(this);
-    handle.descriptor.shutdown(handle.descriptor.plugin_ctx, api);
+    try {
+      handle.descriptor.shutdown(handle.descriptor.plugin_ctx, api);
+    } catch (const std::exception& e) {
+      qWarning() << "[Plugins] Exception in shutdown for" << handle.id << ":" << e.what();
+    } catch (...) {
+      qWarning() << "[Plugins] Unknown exception in shutdown for" << handle.id;
+    }
+  }
+  if (const size_t reclaimed = m_bridge.reclaimPluginAllocations(handle.bindingCtx.get()); reclaimed > 0u) {
+    const QString msg = QStringLiteral("Reclaimed %1 leaked host allocation(s) on unload of plugin '%2'")
+                            .arg(reclaimed)
+                            .arg(handle.id);
+    qWarning() << "[Plugins]" << msg;
+    emit m_bridge.pluginLogReceived(handle.id, GRIDLOCK_LOG_WARN, msg);
   }
   m_bridge.unregisterPluginResources(handle.id);
   if (handle.library) { handle.library->unload(); handle.library.reset(); }
@@ -634,7 +686,15 @@ void PluginManager::notifySessionStarted(int32_t rankCount) {
   ScopedCallbackDepth guard(this);
   for (size_t i = 0; i < m_activePlugins.size() && !m_pendingUnloadAll && !m_pendingDiscoverAndLoad; ++i) {
     auto& h = m_activePlugins[i];
-    if (h.descriptor.on_session_start != nullptr) (void)h.descriptor.on_session_start(h.descriptor.plugin_ctx, h.hostApi.get(), rankCount);
+    if (h.descriptor.on_session_start != nullptr) {
+      try {
+        (void)h.descriptor.on_session_start(h.descriptor.plugin_ctx, h.hostApi.get(), rankCount);
+      } catch (const std::exception& e) {
+        qWarning() << "[Plugins] Exception in on_session_start for" << h.id << ":" << e.what();
+      } catch (...) {
+        qWarning() << "[Plugins] Unknown exception in on_session_start for" << h.id;
+      }
+    }
   }
 }
 
@@ -659,7 +719,15 @@ void PluginManager::notifyRankStopped(const GridLockStopInfo& stopInfo) {
                           cur.hasFunction ? cur.functionUtf8.constData() : nullptr};
     for (size_t i = 0; i < m_activePlugins.size() && !m_pendingUnloadAll && !m_pendingDiscoverAndLoad; ++i) {
       auto& h = m_activePlugins[i];
-      if (h.descriptor.on_rank_stopped != nullptr) (void)h.descriptor.on_rank_stopped(h.descriptor.plugin_ctx, h.hostApi.get(), &info);
+      if (h.descriptor.on_rank_stopped != nullptr) {
+        try {
+          (void)h.descriptor.on_rank_stopped(h.descriptor.plugin_ctx, h.hostApi.get(), &info);
+        } catch (const std::exception& e) {
+          qWarning() << "[Plugins] Exception in on_rank_stopped for" << h.id << ":" << e.what();
+        } catch (...) {
+          qWarning() << "[Plugins] Unknown exception in on_rank_stopped for" << h.id;
+        }
+      }
     }
   }
   m_dispatchingStop = false;
@@ -684,7 +752,15 @@ void PluginManager::notifySessionEnded() {
   ScopedCallbackDepth guard(this);
   for (size_t i = 0; i < m_activePlugins.size() && !m_pendingUnloadAll && !m_pendingDiscoverAndLoad; ++i) {
     auto& h = m_activePlugins[i];
-    if (h.descriptor.on_session_end != nullptr) (void)h.descriptor.on_session_end(h.descriptor.plugin_ctx, h.hostApi.get());
+    if (h.descriptor.on_session_end != nullptr) {
+      try {
+        (void)h.descriptor.on_session_end(h.descriptor.plugin_ctx, h.hostApi.get());
+      } catch (const std::exception& e) {
+        qWarning() << "[Plugins] Exception in on_session_end for" << h.id << ":" << e.what();
+      } catch (...) {
+        qWarning() << "[Plugins] Unknown exception in on_session_end for" << h.id;
+      }
+    }
   }
 }
 

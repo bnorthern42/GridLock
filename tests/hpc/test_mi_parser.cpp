@@ -6,11 +6,14 @@
  * record suppression, escaped string unescaping, and raw stream tracing modes.
  */
 
+#include <QFile>
 #include <QObject>
 #include <QString>
+#include <QTemporaryDir>
 #include <QtTest/QtTest>
 
 #include "../../src/core/hpc/gdb/GdbMiParser.hpp"
+#include "../../src/core/hpc/gdb/GdbMiTranscriptRecorder.hpp"
 #include "../../src/core/hpc/gdb/LanguageExpressionHelper.hpp"
 #include "../../src/ui/GdbConsoleWidget.hpp"
 
@@ -237,6 +240,77 @@ private slots:
         const auto unterminatedFields = parseMiTupleFields(QStringLiteral("name=\"x\",value=\"dangling\\"));
         QCOMPARE(unterminatedFields.value(QStringLiteral("name")), QStringLiteral("x"));
         QVERIFY(!unterminatedFields.contains(QStringLiteral("value")));
+    }
+
+    void testGdbMiTranscriptRecorderAndSanitizer() {
+        using gridlock::core::GdbMiTranscriptRecorder;
+        GdbMiTranscriptRecorder::SanitizeContext ctx;
+        ctx.homeDir = QStringLiteral("/home/alice");
+        ctx.userName = QStringLiteral("alice");
+        ctx.hostName = QStringLiteral("hpc-node04");
+
+        // 1. Deterministic redaction preserves valid GDB/MI syntax, types, addresses, and error codes.
+        const QString rawStop = QStringLiteral(
+            "*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401234\",func=\"solve\","
+            "fullname=\"/home/alice/mpi_app/solver.f90\",line=\"42\"},host=\"alice@hpc-node04\"");
+        const QString sanStop = GdbMiTranscriptRecorder::sanitizeLine(rawStop, ctx);
+        QVERIFY(!sanStop.contains(QStringLiteral("alice")));
+        QVERIFY(!sanStop.contains(QStringLiteral("hpc-node04")));
+        QVERIFY(sanStop.contains(QStringLiteral("/home/<USER>/mpi_app/solver.f90")));
+        QVERIFY(sanStop.contains(QStringLiteral("<USER>@<HOST>")));
+        bool hasFrame = false;
+        const auto frameFields = gridlock::mi::parseMiTupleFields(
+            gridlock::mi::extractMiTupleBody(sanStop, QStringLiteral("frame={"), &hasFrame));
+        QVERIFY(hasFrame);
+        QCOMPARE(frameFields.value(QStringLiteral("addr")), QStringLiteral("0x401234"));
+        QCOMPARE(frameFields.value(QStringLiteral("fullname")), QStringLiteral("/home/<USER>/mpi_app/solver.f90"));
+        QCOMPARE(frameFields.value(QStringLiteral("line")), QStringLiteral("42"));
+
+        // Environment variable values in -gdb-set environment and console set environment are redacted.
+        QCOMPARE(GdbMiTranscriptRecorder::sanitizeLine(
+                     QStringLiteral("42-gdb-set environment SECRET_TOKEN=ghp_supersecret123"), ctx),
+                 QStringLiteral("42-gdb-set environment SECRET_TOKEN=<REDACTED>"));
+        QCOMPARE(GdbMiTranscriptRecorder::sanitizeLine(
+                     QStringLiteral("-gdb-set environment API_KEY my_private_key"), ctx),
+                 QStringLiteral("-gdb-set environment API_KEY <REDACTED>"));
+        QVERIFY(GdbMiTranscriptRecorder::sanitizeLine(
+                    QStringLiteral("-interpreter-exec console \"set environment DB_PASS=hunter2\""), ctx)
+                    .contains(QStringLiteral("set environment DB_PASS=<REDACTED>")));
+        QVERIFY(GdbMiTranscriptRecorder::sanitizeLine(QStringLiteral("/work/bob/proj/a.cpp"), ctx)
+                    .contains(QStringLiteral("/work/<USER>/proj/a.cpp")));
+
+        // 2. Ring-buffer line-count and byte-size eviction keeps only the newest entries.
+        GdbMiTranscriptRecorder rec(3u, 4096u);
+        rec.setMpiLauncherMode(QStringLiteral("mpi:mpirun (ranks=2)"));
+        rec.record(0, false, QStringLiteral("~\"GNU gdb (GDB) 15.2\\n\""));
+        rec.record(0, true, QStringLiteral("-gdb-set environment TOKEN=abc123"));
+        rec.record(0, false, rawStop);
+        rec.record(1, true, QStringLiteral("-stack-list-variables --all-values"));
+        QCOMPARE(rec.entryCount(), size_t{3u});
+
+        QTemporaryDir tmpDir;
+        QVERIFY(tmpDir.isValid());
+        const QString outPath = tmpDir.filePath(QStringLiteral("trace.mi.log"));
+        QString err;
+        QVERIFY2(rec.exportToFile(outPath, &err, ctx), qPrintable(err));
+        QFile f(outPath);
+        QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QString exported = QString::fromUtf8(f.readAll());
+        QVERIFY(exported.contains(QStringLiteral("# GridLock Sanitized GDB/MI Session Trace")));
+        QVERIFY(exported.contains(QStringLiteral("# GDB Version: GNU gdb (GDB) 15.2")));
+        QVERIFY(exported.contains(QStringLiteral("# MPI Launcher Mode: mpi:mpirun (ranks=2)")));
+        QVERIFY(exported.contains(QStringLiteral("[rank 0] -> -gdb-set environment TOKEN=<REDACTED>")));
+        QVERIFY(exported.contains(QStringLiteral("[rank 1] -> -stack-list-variables --all-values")));
+        QVERIFY(!exported.contains(QStringLiteral("alice")));
+        QVERIFY(!exported.contains(QStringLiteral("hpc-node04")));
+        QVERIFY(!exported.contains(QStringLiteral("abc123")));
+
+        // Byte-size cap eviction works independently of line count.
+        rec.setMaxLimits(100u, 180u);
+        for (int i = 0; i < 10; ++i) {
+            rec.record(0, false, QStringLiteral("^done,seq=\"%1\",pad=\"0123456789abcdef\"").arg(i));
+        }
+        QVERIFY(rec.totalBytes() <= 180u && rec.entryCount() >= 1u && rec.entryCount() < 10u);
     }
 };
 

@@ -14,6 +14,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDockWidget>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -28,6 +29,7 @@
 #include <QSettings>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTimer>
@@ -35,6 +37,7 @@
 #include <QWindow>
 
 #include "../core/Version.hpp"
+#include "../core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../core/hpc/system/LocalSlurmBackend.hpp"
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/ShortcutManager.hpp"
@@ -522,6 +525,11 @@ void MainWindow::setupMenu() {
     progCalcAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C));
     connect(progCalcAction, &QAction::triggered, this, &MainWindow::openProgrammerCalculator);
 
+    toolsMenu->addSeparator();
+    QAction* exportMiTraceAction = toolsMenu->addAction(QStringLiteral("Export Sanitized GDB/MI Trace..."));
+    exportMiTraceAction->setObjectName(QStringLiteral("actionExportSanitizedMiTrace"));
+    connect(exportMiTraceAction, &QAction::triggered, this, [this]() { (void)exportSanitizedMiTrace(); });
+
     // Construct Help menu with About dialog and attribution metadata.
     QMenu* helpMenu = menuBar->addMenu("&Help");
     QAction* aboutAction = helpMenu->addAction("About GridLock");
@@ -554,6 +562,39 @@ void MainWindow::setupMenu() {
         msgBox.setTextInteractionFlags(Qt::TextBrowserInteraction);
         msgBox.exec();
     });
+}
+
+bool MainWindow::exportSanitizedMiTrace(const QString& explicitPath) {
+    QString targetPath = explicitPath.trimmed();
+    if (targetPath.isEmpty()) {
+        targetPath = QFileDialog::getSaveFileName(
+            this,
+            QStringLiteral("Export Sanitized GDB/MI Trace"),
+            QStringLiteral("gridlock_mi_trace.mi.log"),
+            QStringLiteral("GDB/MI Trace Logs (*.mi.log *.txt);;All Files (*)"));
+        if (targetPath.isEmpty()) return false;
+    }
+
+    QString errMsg;
+    bool ok = false;
+    if (auto* gdbCoord = qobject_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+        gdbCoord->miTranscriptRecorder().setGridLockVersion(gridlock::core::Version::getString());
+        ok = gdbCoord->exportSanitizedMiTraceToFile(targetPath, &errMsg);
+    } else {
+        gridlock::core::GdbMiTranscriptRecorder emptyRecorder;
+        emptyRecorder.setGridLockVersion(gridlock::core::Version::getString());
+        ok = emptyRecorder.exportToFile(targetPath, &errMsg);
+    }
+
+    if (ok) {
+        if (statusBar()) {
+            statusBar()->showMessage(QStringLiteral("Exported sanitized GDB/MI trace to %1").arg(targetPath), 5000);
+        }
+    } else if (explicitPath.trimmed().isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Export Sanitized GDB/MI Trace"),
+                             QStringLiteral("Failed to write GDB/MI trace:\n%1").arg(errMsg));
+    }
+    return ok;
 }
 
 }  // namespace gridlock::ui
