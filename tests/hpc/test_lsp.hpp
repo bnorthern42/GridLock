@@ -53,4 +53,9 @@ private slots:
      * @brief Verifies single-file and cross-file clangd definition, references, and WorkspaceEdit rename.
      */
     void testClangdNavigationAndWorkspaceRename();
+
+    /**
+     * @brief Verifies bounded JSON-RPC framing (Content-Length: 0, split/back-to-back, oversized caps) and compile_commands.json discovery.
+     */
+    void testBoundedJsonRpcFramerAndCompileCommands();
 };

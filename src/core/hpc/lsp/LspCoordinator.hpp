@@ -16,6 +16,8 @@
 #include <QProcess>
 #include <QString>
 
+#include "../../utils/JsonRpcFramer.hpp"
+
 namespace gridlock::core {
 
 /**
@@ -60,9 +62,33 @@ class LspCoordinator : public QObject {
                     QPoint globalPos = QPoint());
 
   /**
+   * @brief Configures an explicit directory containing `compile_commands.json` (empty enables auto-discovery).
+   */
+  void setCompileCommandsDir(const QString& dir);
+
+  /**
+   * @brief Returns the explicitly configured `compile_commands.json` directory override, if any.
+   */
+  QString compileCommandsDir() const { return m_compileCommandsDir; }
+
+  /**
+   * @brief Resolves the `compile_commands.json` directory for @p targetFileOrDir.
+   *
+   * Checks @p explicitOverride first, then `builddir/`, `build/`, and `<dir>/` walking upward
+   * from @p targetFileOrDir. Returns an empty string if no compilation database exists.
+   */
+  static QString resolveCompileCommandsDir(const QString& targetFileOrDir,
+                                           const QString& explicitOverride = QString());
+
+  /**
    * @brief Returns `true` once the `clangd` server has replied to the `initialize` handshake.
    */
   bool isInitialized() const { return m_isInitialized; }
+
+  /**
+   * @brief Returns the number of currently buffered incomplete JSON-RPC bytes.
+   */
+  qsizetype bufferedBytes() const { return m_framer.bufferedBytes(); }
 
   /**
    * @brief Wraps a JSON-RPC object in an HTTP-style `Content-Length: <N>\r\n\r\n` frame.
@@ -80,6 +106,11 @@ class LspCoordinator : public QObject {
    */
   void hoverResultReceived(const QString& resultMarkdown, const QPoint& globalPos);
 
+  /**
+   * @brief Emitted when malformed, oversized, or corrupted JSON-RPC framing is rejected.
+   */
+  void protocolError(const QString& message);
+
  private slots:
   /** @brief Reads available bytes from `clangd` stdout and forwards to `processRawOutput()`. */
   void readyReadStandardOutput();
@@ -93,7 +124,8 @@ class LspCoordinator : public QObject {
   void processMessage(const QJsonObject& message);
 
   QProcess* m_process = nullptr;      ///< Child `clangd` process handle.
-  QByteArray m_buffer;                ///< Accumulation buffer for partial LSP frames.
+  JsonRpcFramer m_framer;             ///< Bounded accumulation buffer for partial LSP frames.
+  QString m_compileCommandsDir;       ///< Optional explicit `--compile-commands-dir` override.
   int m_nextRequestId = 1;            ///< Monotonically increasing JSON-RPC request ID.
   QMap<int, QPoint> m_hoverRequests;  ///< Maps pending hover request IDs to screen coordinates.
   bool m_isInitialized = false;       ///< Whether the LSP `initialized` handshake has completed.

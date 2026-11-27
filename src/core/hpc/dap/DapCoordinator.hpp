@@ -27,6 +27,7 @@
 
 #include "../IBackendCoordinator.hpp"
 #include "../system/ProcessScanner.hpp"
+#include "../../utils/JsonRpcFramer.hpp"
 
 /**
  * @enum SessionState
@@ -76,6 +77,12 @@ class DapCoordinator : public IBackendCoordinator {
 
   /** @brief Appends raw stdout bytes from the adapter and parses complete `Content-Length` frames. */
   void processRawData(const QByteArray& data);
+
+  /** @brief Returns the number of currently buffered incomplete DAP frame bytes. */
+  qsizetype bufferedBytes() const { return m_framer.bufferedBytes(); }
+
+  /** @brief Returns `true` when opt-in `GRIDLOCK_DAP_TRACE` verbose TX/RX wire tracing is enabled. */
+  static bool isTraceLoggingEnabled();
 
   /** @brief Cancels any active SLURM job, sends `disconnect`, and stops the adapter. */
   void terminateSession() override;
@@ -372,7 +379,7 @@ class DapCoordinator : public IBackendCoordinator {
   void syncDataBreakpoints();
 
   QProcess* m_process = nullptr;                     ///< Underlying `lldb-dap` child process.
-  QByteArray m_buffer;                               ///< Receive buffer for partial DAP frames.
+  gridlock::core::JsonRpcFramer m_framer;            ///< Bounded receive framer for partial DAP frames.
   std::atomic<int> m_sequenceNumber{1};              ///< Monotonic DAP `seq` counter.
   QMap<QString, QList<int>> m_breakpoints;           ///< Active breakpoints keyed by source file path.
   QMap<int, int> m_stackTraceRequests;               ///< Maps `request_seq` to `rankId`.

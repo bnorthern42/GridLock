@@ -18,6 +18,8 @@
 #include <QStringList>
 #include <QVector>
 
+#include "JsonRpcFramer.hpp"
+
 namespace gridlock::core {
 
 /**
@@ -300,6 +302,11 @@ signals:
                          const QString& filePath,
                          const QVector<gridlock::core::ClangdLspClient::LspCompletionItem>& items);
 
+    /**
+     * @brief Emitted when malformed, oversized, or corrupted JSON-RPC framing is rejected.
+     */
+    void protocolError(const QString& message);
+
 private:
     struct PendingCompletion {
         quint64 seq = 0;  ///< Monotonic completion sequence number.
@@ -337,7 +344,7 @@ private:
     QJsonObject readResponseForId(int requestId, int timeoutMs);
 
     QProcess* m_process = nullptr;                        ///< Persistent clangd stdio child process.
-    QByteArray m_readBuffer;                              ///< Accumulator buffer for incoming Content-Length frames.
+    JsonRpcFramer m_framer;                               ///< Bounded accumulator for incoming Content-Length frames.
     QVector<QByteArray> m_pendingOutboundFrames;          ///< Outbound LSP frames queued while clangd is starting.
     bool m_initialized = false;                           ///< True after initialize/initialized handshake is queued or completed.
     int m_nextRequestId = 1;                              ///< Monotonically increasing JSON-RPC request identifier.

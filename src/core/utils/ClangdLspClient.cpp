@@ -8,10 +8,12 @@
  */
 
 #include "ClangdLspClient.hpp"
+#include "ClangdLspScopeAnalyzer.hpp"
 
 #include <algorithm>
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -22,90 +24,6 @@
 #include <QUrl>
 
 namespace gridlock::core {
-
-namespace {
-
-/**
- * @brief Strips array subscripts (`[i]`) and call parentheses (`()`) from a C++ receiver segment.
- * @param segment Raw receiver segment token (e.g., "data[i]" or "vec.at(0)").
- * @return Clean base identifier string (e.g., "data").
- */
-QString stripSubscriptsAndCalls(const QString& segment) {
-    QString clean = segment.trimmed();
-    const int bracketIdx = clean.indexOf(QLatin1Char('['));
-    if (bracketIdx >= 0) {
-        clean = clean.left(bracketIdx).trimmed();
-    }
-    const int parenIdx = clean.indexOf(QLatin1Char('('));
-    if (parenIdx >= 0) {
-        clean = clean.left(parenIdx).trimmed();
-    }
-    return clean;
-}
-
-/**
- * @brief Extracts declared identifier names from a single C++ field or variable declaration statement.
- * @param declStmt Statement body without trailing semicolon (e.g., "float x, y, z" or "double values[5]").
- * @param outType Optional output parameter receiving the base type token.
- * @return Ordered list of declared identifier names.
- */
-QStringList parseDeclaredNames(const QString& declStmt, QString* outType = nullptr) {
-    QString trimmed = declStmt.trimmed();
-    // Ignore control-flow statements, preprocessor directives, and function calls.
-    if (trimmed.isEmpty() || trimmed.startsWith(QLatin1Char('#')) ||
-        trimmed.startsWith(QStringLiteral("//")) || trimmed.startsWith(QStringLiteral("return ")) ||
-        trimmed.startsWith(QStringLiteral("MPI_")) || trimmed.startsWith(QStringLiteral("printf"))) {
-        return {};
-    }
-
-    // Remove leading qualifiers such as const, static, constexpr, unsigned, or struct.
-    static const QRegularExpression kQualifiersRe(
-        QStringLiteral("^(?:(?:const|constexpr|static|volatile|unsigned|signed|struct|class)\\s+)+"));
-    trimmed.replace(kQualifiersRe, QString());
-
-    // Match base C++ type (including template arguments like std::vector<int>) followed by declarators.
-    static const QRegularExpression kTypeAndRestRe(
-        QStringLiteral("^([A-Za-z_][A-Za-z0-9_:]*(?:\\s*<[^>]+>)?(?:\\s*[\\*&])?)\\s+(.+)$"));
-    const QRegularExpressionMatch match = kTypeAndRestRe.match(trimmed);
-    if (!match.hasMatch()) {
-        return {};
-    }
-
-    if (outType) {
-        *outType = match.captured(1).trimmed();
-    }
-    const QString declarators = match.captured(2).trimmed();
-
-    // Split comma-separated declarators while respecting parentheses in constructor initializers.
-    QStringList names;
-    int parenDepth = 0;
-    int startIdx = 0;
-    for (int i = 0; i <= declarators.size(); ++i) {
-        const QChar ch = (i < declarators.size()) ? declarators.at(i) : QLatin1Char(',');
-        if (ch == QLatin1Char('(') || ch == QLatin1Char('{') || ch == QLatin1Char('<')) {
-            ++parenDepth;
-        } else if (ch == QLatin1Char(')') || ch == QLatin1Char('}') || ch == QLatin1Char('>')) {
-            parenDepth = std::max(0, parenDepth - 1);
-        } else if (ch == QLatin1Char(',') && parenDepth == 0) {
-            QString part = declarators.mid(startIdx, i - startIdx).trimmed();
-            startIdx = i + 1;
-            const int eqIdx = part.indexOf(QLatin1Char('='));
-            if (eqIdx >= 0) part = part.left(eqIdx).trimmed();
-            part = stripSubscriptsAndCalls(part);
-            while (part.startsWith(QLatin1Char('*')) || part.startsWith(QLatin1Char('&'))) {
-                part.remove(0, 1);
-            }
-            part = part.trimmed();
-            static const QRegularExpression kIdentRe(QStringLiteral("^[A-Za-z_][A-Za-z0-9_]*$"));
-            if (kIdentRe.match(part).hasMatch()) {
-                names.append(part);
-            }
-        }
-    }
-    return names;
-}
-
-}  // namespace
 
 /**
  * @brief Returns the shared process-wide ClangdLspClient singleton.
@@ -154,7 +72,7 @@ void ClangdLspClient::stopServerProcess() {
         m_process = nullptr;
     }
     m_initialized = false;
-    m_readBuffer.clear();
+    m_framer.clear();
     m_activeDocumentUri.clear();
     m_activeRootDir.clear();
     m_activeCompileCommandsDir.clear();
@@ -195,9 +113,7 @@ QString ClangdLspClient::buildVirtualCompletionDocument(const QString& sourceCod
  * @return UTF-8 encoded LSP message frame ready for `QProcess::write`.
  */
 QByteArray ClangdLspClient::encodeLspMessage(const QJsonObject& payload) {
-    const QByteArray jsonBytes = QJsonDocument(payload).toJson(QJsonDocument::Compact);
-    QByteArray header = "Content-Length: " + QByteArray::number(jsonBytes.size()) + "\r\n\r\n";
-    return header + jsonBytes;
+    return JsonRpcFramer::encode(payload);
 }
 
 /**
@@ -262,7 +178,7 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
     // Spawn the clangd subprocess asynchronously when starting fresh or recovering from a CompilationDatabase switch.
     if (m_process->state() == QProcess::NotRunning) {
         m_initialized = false;
-        m_readBuffer.clear();
+        m_framer.clear();
         m_pendingOutboundFrames.clear();
         m_activeDocumentUri.clear();
         m_pendingCompletions.clear();
@@ -410,38 +326,18 @@ void ClangdLspClient::sendJsonRpc(const QJsonObject& payload) {
  * `readResponseForId` so neither notifications nor request responses can be lost during nested waits.
  */
 void ClangdLspClient::drainIncomingMessages() {
-    if (m_process && m_process->bytesAvailable() > 0) {
-        m_readBuffer.append(m_process->readAllStandardOutput());
+    if (!m_process || m_process->bytesAvailable() <= 0) {
+        return;
     }
 
-    // Extract every complete Content-Length frame currently buffered in m_readBuffer.
-    while (true) {
-        const int headerEnd = m_readBuffer.indexOf("\r\n\r\n");
-        if (headerEnd < 0) break;
+    const auto framed = m_framer.feed(m_process->readAllStandardOutput());
+    for (const QString& err : framed.errors) {
+        qWarning() << "[clangd LSP]" << err;
+        emit protocolError(err);
+    }
 
-        // Parse the HTTP-style `Content-Length:` header preceding the `\r\n\r\n` separator.
-        const QByteArray headerBlock = m_readBuffer.left(headerEnd);
-        int contentLen = -1;
-        for (const QByteArray& line : headerBlock.split('\n')) {
-            const QByteArray trimmed = line.trimmed();
-            if (trimmed.toLower().startsWith("content-length:")) {
-                contentLen = trimmed.mid(15).trimmed().toInt();
-                break;
-            }
-        }
-        if (contentLen < 0) {
-            m_readBuffer.remove(0, headerEnd + 4);
-            continue;
-        }
-        const int totalFrameBytes = headerEnd + 4 + contentLen;
-        if (m_readBuffer.size() < totalFrameBytes) {
-            break;
-        }
-
-        // Slice out the exact UTF-8 JSON payload bytes and advance m_readBuffer past the frame.
-        const QByteArray bodyBytes = m_readBuffer.mid(headerEnd + 4, contentLen);
-        m_readBuffer.remove(0, totalFrameBytes);
-
+    // Dispatch every complete Content-Length frame extracted by the bounded framer.
+    for (const QByteArray& bodyBytes : framed.payloads) {
         const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
         if (!doc.isObject()) continue;
         const QJsonObject obj = doc.object();
@@ -591,218 +487,8 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
     int targetLineOneBased,
     const QString& partialExpression,
     int timeoutMs) {
-    // Maps struct type identifiers to their declared member field names.
-    QMap<QString, QStringList> structMembers;
-    // Maps composite field access paths (e.g., Struct.field) to their resolved types.
-    QMap<QString, QString> memberNestedTypes;
-    // Tracks in-scope local variable types declared prior to target line.
-    QMap<QString, QString> varTypes;
-    // Stores structured LspCompletionItem definitions with kind badges and signatures.
-    QMap<QString, QVector<LspCompletionItem>> structDetailedMembers;
-
-    // Split the translation unit into individual lines for lexical scanning.
-    const QStringList lines = sourceCode.split(QLatin1Char('\n'));
-    QString currentOuterStruct;
-    QString currentAnonStructFieldsPending;
-    bool inAnonNestedStruct = false;
-
-    for (int idx = 0; idx < lines.size(); ++idx) {
-        QString line = lines.at(idx).trimmed();
-        // Strip line comments before parsing C++ declarations.
-        const int commentIdx = line.indexOf(QStringLiteral("//"));
-        if (commentIdx >= 0) line = line.left(commentIdx).trimmed();
-        // Skip blank lines, header banners, and block comments.
-        if (line.isEmpty() || line.startsWith(QLatin1Char('*')) || line.startsWith(QStringLiteral("/*"))) {
-            continue;
-        }
-
-        // Match outer struct declaration headers (e.g., 'struct WorkerData {').
-        static const QRegularExpression kStructStartRe(QStringLiteral("^struct\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\{"));
-        const QRegularExpressionMatch structMatch = kStructStartRe.match(line);
-        if (structMatch.hasMatch() && currentOuterStruct.isEmpty()) {
-            currentOuterStruct = structMatch.captured(1);
-            continue;
-        }
-
-        if (!currentOuterStruct.isEmpty()) {
-            // Detect anonymous nested struct definition blocks inside outer structs.
-            if (line.startsWith(QStringLiteral("struct")) && line.contains(QLatin1Char('{'))) {
-                inAnonNestedStruct = true;
-                currentAnonStructFieldsPending.clear();
-                continue;
-            }
-            if (inAnonNestedStruct) {
-                // Parse anonymous nested struct closing brace and field identifier.
-                static const QRegularExpression kAnonEndRe(QStringLiteral("^\\}\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*;"));
-                const QRegularExpressionMatch anonEnd = kAnonEndRe.match(line);
-                if (anonEnd.hasMatch()) {
-                    const QString nestedFieldName = anonEnd.captured(1);
-                    // Synthesize qualified pseudo-type name for nested anonymous member fields.
-                    const QString syntheticType = currentOuterStruct + QStringLiteral("::") + nestedFieldName;
-                    structMembers[currentOuterStruct].append(nestedFieldName);
-                    memberNestedTypes[currentOuterStruct + QLatin1Char('.') + nestedFieldName] = syntheticType;
-
-                    // Record nested struct field candidate item for IntelliSense popup.
-                    LspCompletionItem anonItem;
-                    anonItem.label = nestedFieldName;
-                    anonItem.insertText = nestedFieldName;
-                    anonItem.kindLabel = QStringLiteral("Field");
-                    anonItem.detailType = QStringLiteral("struct ") + nestedFieldName;
-                    structDetailedMembers[currentOuterStruct].append(anonItem);
-
-                    // Parse declared inner member field names and associate float/int types.
-                    for (const QString& stmt : currentAnonStructFieldsPending.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
-                        QString innerType;
-                        for (const QString& f : parseDeclaredNames(stmt, &innerType)) {
-                            if (!structMembers[syntheticType].contains(f)) {
-                                structMembers[syntheticType].append(f);
-                                LspCompletionItem innerItem;
-                                innerItem.label = f;
-                                innerItem.insertText = f;
-                                innerItem.kindLabel = QStringLiteral("Field");
-                                innerItem.detailType = innerType.isEmpty() ? QStringLiteral("float") : innerType;
-                                structDetailedMembers[syntheticType].append(innerItem);
-                            }
-                        }
-                    }
-                    inAnonNestedStruct = false;
-                } else {
-                    currentAnonStructFieldsPending += QLatin1Char(' ') + line;
-                }
-                continue;
-            }
-            // Handle outer struct closing delimiter.
-            if (line.startsWith(QStringLiteral("};"))) {
-                currentOuterStruct.clear();
-                continue;
-            }
-            // Parse semicolon-separated member field declarations.
-            for (const QString& stmt : line.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
-                QString fieldType;
-                for (const QString& f : parseDeclaredNames(stmt, &fieldType)) {
-                    if (!structMembers[currentOuterStruct].contains(f)) {
-                        structMembers[currentOuterStruct].append(f);
-                    }
-                    QString effectiveType = fieldType;
-                    // Check for fixed-size C-style array bounds (e.g., double values[5]).
-                    if (stmt.contains(f + QStringLiteral("["))) {
-                        int lb = stmt.indexOf(f + QStringLiteral("["));
-                        int rb = stmt.indexOf(QLatin1Char(']'), lb);
-                        if (rb > lb) {
-                            effectiveType = fieldType + stmt.mid(lb + f.length(), rb - (lb + f.length()) + 1);
-                        }
-                    }
-                    if (effectiveType.isEmpty()) effectiveType = QStringLiteral("int");
-                    memberNestedTypes[currentOuterStruct + QLatin1Char('.') + f] = effectiveType;
-
-                    // Record structured completion item for the member field.
-                    LspCompletionItem item;
-                    item.label = f;
-                    item.insertText = f;
-                    item.kindLabel = QStringLiteral("Field");
-                    item.detailType = effectiveType;
-                    structDetailedMembers[currentOuterStruct].append(item);
-                }
-            }
-            continue;
-        }
-
-        if (idx < targetLineOneBased && idx >= std::max(0, targetLineOneBased - 200)) {
-            // Extract loop control variable declarations (e.g., for (int i = 0; ...)).
-            static const QRegularExpression kForLoopRe(QStringLiteral("for\\s*\\(([^;]+);"));
-            const QRegularExpressionMatch forMatch = kForLoopRe.match(line);
-            if (forMatch.hasMatch()) {
-                QString loopType;
-                for (const QString& v : parseDeclaredNames(forMatch.captured(1), &loopType)) {
-                    varTypes[v] = loopType.isEmpty() ? QStringLiteral("int") : loopType;
-                }
-            }
-            // Extract local variable declarations preceding the target line.
-            for (const QString& stmt : line.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
-                QString declType;
-                for (const QString& v : parseDeclaredNames(stmt, &declType)) {
-                    varTypes[v] = declType.isEmpty() ? QStringLiteral("int") : declType;
-                }
-            }
-        }
-    }
-
-    const QString trimmedExpr = partialExpression.trimmed();
-    // Determine separator position (. or ->) in partial completion expression.
-    const int lastDot = trimmedExpr.lastIndexOf(QLatin1Char('.'));
-    const int lastArrow = trimmedExpr.lastIndexOf(QStringLiteral("->"));
-    const int sepPos = std::max(lastDot, (lastArrow >= 0) ? (lastArrow + 1) : -1);
-
-    QVector<LspCompletionItem> candidates;
-    QString memberPrefix;
-
-    if (sepPos >= 0) {
-        // Extract receiver expression chain preceding the member access separator.
-        const int receiverEnd = (lastArrow > lastDot) ? lastArrow : lastDot;
-        QString receiverChain = trimmedExpr.left(receiverEnd).trimmed();
-        // Extract trailing identifier prefix after the member access operator.
-        memberPrefix = trimmedExpr.mid(sepPos + 1).trimmed();
-
-        static const QRegularExpression kTrailingChainRe(QStringLiteral("([A-Za-z_][A-Za-z0-9_\\[\\]\\.\\->]*)$"));
-        const QRegularExpressionMatch chainMatch = kTrailingChainRe.match(receiverChain);
-        if (chainMatch.hasMatch()) {
-            receiverChain = chainMatch.captured(1);
-        }
-
-        // Normalize pointer arrows into dot separators and walk nested field types left-to-right.
-        QString normChain = receiverChain;
-        normChain.replace(QStringLiteral("->"), QStringLiteral("."));
-        const QStringList segments = normChain.split(QLatin1Char('.'), Qt::SkipEmptyParts);
-        if (!segments.isEmpty()) {
-            const QString rootVar = stripSubscriptsAndCalls(segments.first());
-            QString activeType = varTypes.value(rootVar);
-            for (int s = 1; s < segments.size() && !activeType.isEmpty(); ++s) {
-                const QString fieldName = stripSubscriptsAndCalls(segments.at(s));
-                activeType = memberNestedTypes.value(activeType + QLatin1Char('.') + fieldName);
-            }
-
-            // Populate user-defined struct members or standard C++ container methods (`std::vector`, `std::string`).
-            if (structDetailedMembers.contains(activeType)) {
-                candidates = structDetailedMembers.value(activeType);
-            } else if (activeType.contains(QStringLiteral("vector"))) {
-                candidates = {
-                    {QStringLiteral("data()"), QStringLiteral("data()"), QStringLiteral("Method"), QStringLiteral("int*")},
-                    {QStringLiteral("size()"), QStringLiteral("size()"), QStringLiteral("Method"), QStringLiteral("size_t")},
-                    {QStringLiteral("empty()"), QStringLiteral("empty()"), QStringLiteral("Method"), QStringLiteral("bool")},
-                    {QStringLiteral("front()"), QStringLiteral("front()"), QStringLiteral("Method"), QStringLiteral("int&")},
-                    {QStringLiteral("back()"), QStringLiteral("back()"), QStringLiteral("Method"), QStringLiteral("int&")},
-                    {QStringLiteral("at()"), QStringLiteral("at()"), QStringLiteral("Method"), QStringLiteral("int&")},
-                    {QStringLiteral("capacity()"), QStringLiteral("capacity()"), QStringLiteral("Method"), QStringLiteral("size_t")},
-                    {QStringLiteral("clear()"), QStringLiteral("clear()"), QStringLiteral("Method"), QStringLiteral("void")}
-                };
-            } else if (activeType.contains(QStringLiteral("string"))) {
-                candidates = {
-                    {QStringLiteral("c_str()"), QStringLiteral("c_str()"), QStringLiteral("Method"), QStringLiteral("const char*")},
-                    {QStringLiteral("data()"), QStringLiteral("data()"), QStringLiteral("Method"), QStringLiteral("const char*")},
-                    {QStringLiteral("size()"), QStringLiteral("size()"), QStringLiteral("Method"), QStringLiteral("size_t")},
-                    {QStringLiteral("length()"), QStringLiteral("length()"), QStringLiteral("Method"), QStringLiteral("size_t")},
-                    {QStringLiteral("empty()"), QStringLiteral("empty()"), QStringLiteral("Method"), QStringLiteral("bool")},
-                    {QStringLiteral("substr()"), QStringLiteral("substr()"), QStringLiteral("Method"), QStringLiteral("std::string")}
-                };
-            }
-        }
-    } else {
-        // When no `.` or `->` separator is present, offer sorted in-scope local variables.
-        memberPrefix = trimmedExpr;
-        QStringList locals = varTypes.keys();
-        locals.sort();
-        for (const QString& v : locals) {
-            candidates.append({v, v, QStringLiteral("Variable"), varTypes.value(v, QStringLiteral("int"))});
-        }
-    }
-
-    // Filter candidate items case-insensitively against the trailing user-typed identifier prefix.
-    QVector<LspCompletionItem> filtered;
-    for (const auto& c : candidates) {
-        if (memberPrefix.isEmpty() || c.label.startsWith(memberPrefix, Qt::CaseInsensitive)) {
-            filtered.append(c);
-        }
-    }
+    QVector<LspCompletionItem> filtered = detail::analyzeStructuralCompletions(
+        sourceCode, targetLineOneBased, partialExpression);
 
     // Augment structural candidates with live `clangd` `textDocument/completion` results when budget permits.
     if (timeoutMs > 0) {

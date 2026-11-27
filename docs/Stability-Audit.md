@@ -103,13 +103,13 @@ Baseline inventory across `src/`, `include/`, and `tests/` (`agent.md` ceiling: 
 ### 3.3 LSP / DAP & External Tool Integration
 
 - [ ] **Consolidate duplicate LSP clients (`LspCoordinator` + `ClangdLspClient`)**:
-  - `src/core/hpc/lsp/LspCoordinator.cpp` and `src/core/utils/ClangdLspClient.cpp` both spawn `clangd` and implement separate `Content-Length` parsers. Consolidate onto a single framed JSON-RPC transport class.
-- [ ] **Enforce framing safety & recovery in LSP and DAP parsers**:
-  - **Fix `Content-Length: 0` deadlock** in `src/core/hpc/lsp/LspCoordinator.cpp:144-153`: use case-insensitive `content-length:` matching and discard invalid/zero-length headers rather than `break`ing forever with unconsumed bytes in `m_buffer`.
-  - **Add strict upper bounds** (e.g., `64 MiB` max `Content-Length` and max rolling `m_buffer` / `m_readBuffer` size) in `LspCoordinator.cpp:132`, `ClangdLspClient.cpp:414-443`, and `DapCoordinator.cpp:208-235` to prevent OOM or permanent sync loss on corrupted server stdout.
-  - **Remove hardcoded `--compile-commands-dir=build`** in `LspCoordinator.cpp:45` (auto-detect `builddir/`, `build/`, or workspace root as `ClangdLspClient` already does) and pre-verify the configured LSP binary exists before calling `QProcess::start`.
-  - **Bound `m_completedResponses` and add request timeouts**: prune stale entries in `ClangdLspClient::m_completedResponses` (`ClangdLspClient.cpp:478`), add a bounded crash-restart backoff (e.g., max 3 restarts per 60s) when `clangd` crashes, and add request timeout expiration in `DapCoordinator` so hung `lldb-dap` requests fail cleanly instead of stalling UI spinners.
-  - **Gate verbose DAP protocol logging**: guard `qDebug() << "[DAP Sniffer] ..."` in `src/core/hpc/dap/DapCoordinator.cpp:126,256,258` behind a `QLoggingCategory` (disabled by default in release builds) so inferior memory/expressions are not dumped to stdout/journald.
+  - `src/core/hpc/lsp/LspCoordinator.cpp` and `src/core/utils/ClangdLspClient.cpp` now share `gridlock::core::JsonRpcFramer` (`src/core/utils/JsonRpcFramer.hpp`) for bounded `Content-Length` transport; full client lifecycle consolidation remains optional follow-up work.
+- [x] **Enforce framing safety, `compile_commands.json` discovery, & DAP trace gating**:
+  - **Fixed `Content-Length: 0` deadlock & added strict upper bounds** across `LspCoordinator`, `ClangdLspClient`, and `DapCoordinator` via shared `JsonRpcFramer` (`16 MiB` max frame payload, `32 MiB` max rolling receive buffer, `16 KiB` header cap, case-insensitive `Content-Length:` parsing, and clean stream recovery on malformed/oversized headers).
+  - **Replaced hardcoded `--compile-commands-dir=build`** in `LspCoordinator.cpp` with `setCompileCommandsDir(...)` and `resolveCompileCommandsDir(...)` (checking explicit override, `builddir/`, `build/`, and project root, omitting `--compile-commands-dir` when none exist).
+  - **Gated verbose DAP protocol logging**: `[DAP Sniffer]` TX/RX JSON dumps in `src/core/hpc/dap/DapCoordinator.cpp` are now disabled by default and enabled only when `GRIDLOCK_DAP_TRACE=1` is set.
+- [ ] **Remaining LSP/DAP resilience follow-ups**:
+  - Prune stale entries in `ClangdLspClient::m_completedResponses`, add a bounded crash-restart backoff when `clangd` crashes, pre-verify the configured LSP binary exists before `QProcess::start`, and add request timeout expiration in `DapCoordinator`.
 
 ### 3.4 C ABI Plugin Surface (`include/gridlock/plugin_api.h` & `src/core/plugins/`)
 

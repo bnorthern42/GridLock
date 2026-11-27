@@ -34,6 +34,44 @@ LspCoordinator::~LspCoordinator() {
   stop();
 }
 
+void LspCoordinator::setCompileCommandsDir(const QString& dir) {
+  m_compileCommandsDir = dir.trimmed();
+}
+
+QString LspCoordinator::resolveCompileCommandsDir(const QString& targetFileOrDir,
+                                                  const QString& explicitOverride) {
+  const QString trimmedOverride = explicitOverride.trimmed();
+  if (!trimmedOverride.isEmpty()) {
+    const QFileInfo overrideInfo(trimmedOverride);
+    if (overrideInfo.isFile()) {
+      return overrideInfo.absolutePath();
+    }
+    if (overrideInfo.exists() && overrideInfo.isDir()) {
+      return QDir(overrideInfo.absoluteFilePath()).absolutePath();
+    }
+  }
+
+  const QString trimmedTarget = targetFileOrDir.trimmed();
+  if (trimmedTarget.isEmpty()) return QString();
+
+  const QFileInfo targetInfo(trimmedTarget);
+  QDir probeDir(targetInfo.isDir() ? targetInfo.absoluteFilePath() : targetInfo.absolutePath());
+  for (int depth = 0; depth < 6 && probeDir.exists(); ++depth) {
+    const QStringList candidates = {
+        probeDir.filePath(QStringLiteral("builddir")),
+        probeDir.filePath(QStringLiteral("build")),
+        probeDir.absolutePath(),
+    };
+    for (const QString& candDir : candidates) {
+      if (QFileInfo::exists(QDir(candDir).filePath(QStringLiteral("compile_commands.json")))) {
+        return QDir(candDir).absolutePath();
+      }
+    }
+    if (!probeDir.cdUp()) break;
+  }
+  return QString();
+}
+
 /**
  * @brief Launches `clangd` in @p targetFilePath's directory and transmits the LSP `initialize` request.
  */
@@ -42,8 +80,13 @@ void LspCoordinator::start(const QString& targetFilePath) {
   m_process->setWorkingDirectory(targetDir);
   const QString clangdPath =
       gridlock::core::ConfigManager::instance().getGlobalClangdPath();
-  m_process->start(clangdPath, QStringList() << "--compile-commands-dir=build"
-                                             << "--header-insertion=never");
+  QStringList args;
+  const QString ccDir = resolveCompileCommandsDir(targetFilePath, m_compileCommandsDir);
+  if (!ccDir.isEmpty()) {
+    args << (QStringLiteral("--compile-commands-dir=") + ccDir);
+  }
+  args << QStringLiteral("--header-insertion=never");
+  m_process->start(clangdPath, args);
 
   // Populate standard LSP `initialize` parameters including workspace root URI.
   QJsonObject params;
@@ -84,17 +127,14 @@ void LspCoordinator::stop() {
       m_process->waitForFinished(500);
     }
   }
+  m_framer.clear();
 }
 
 /**
  * @brief Encodes @p payload as compact UTF-8 JSON prefixed with `Content-Length: <bytes>\r\n\r\n`.
  */
 QByteArray LspCoordinator::formatMessage(const QJsonObject& payload) {
-  const QJsonDocument doc(payload);
-  const QByteArray json = doc.toJson(QJsonDocument::Compact);
-  const QByteArray header =
-      QString("Content-Length: %1\r\n\r\n").arg(json.size()).toUtf8();
-  return header + json;
+  return JsonRpcFramer::encode(payload);
 }
 
 /**
@@ -126,37 +166,23 @@ void LspCoordinator::readyReadStandardOutput() {
 }
 
 /**
- * @brief Parses one or more `Content-Length` framed JSON-RPC messages from `m_buffer`.
+ * @brief Parses one or more `Content-Length` framed JSON-RPC messages via the bounded framer.
  */
 void LspCoordinator::processRawOutput(const QByteArray& data) {
-  m_buffer.append(data);
-
-  // Extract complete `Content-Length` frames in a loop until the buffer is exhausted.
-  while (true) {
-    const int headerEnd = m_buffer.indexOf("\r\n\r\n");
-    if (headerEnd == -1) {
-      break;
-    }
-
-    const QString headers = QString::fromUtf8(m_buffer.left(headerEnd));
-    int contentLength = 0;
-
-    for (const QString& line : headers.split("\r\n")) {
-      if (line.startsWith("Content-Length: ")) {
-        contentLength = line.mid(16).toInt();
-      }
-    }
-
-    // Wait for the full JSON body to arrive if the frame is still incomplete.
-    if (contentLength == 0 || m_buffer.size() < headerEnd + 4 + contentLength) {
-      break;
-    }
-
-    const QByteArray payloadBytes = m_buffer.mid(headerEnd + 4, contentLength);
-    m_buffer.remove(0, headerEnd + 4 + contentLength);
-
+  const auto framed = m_framer.feed(data);
+  for (const QString& err : framed.errors) {
+    qWarning() << "[LSP]" << err;
+    emit protocolError(err);
+  }
+  for (const QByteArray& payloadBytes : framed.payloads) {
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson(payloadBytes, &err);
+    if (err.error != QJsonParseError::NoError) {
+      const QString msg = QStringLiteral("Failed to parse LSP JSON payload: ") + err.errorString();
+      qWarning() << "[LSP]" << msg;
+      emit protocolError(msg);
+      continue;
+    }
     if (doc.isObject()) {
       processMessage(doc.object());
     }

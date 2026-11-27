@@ -434,4 +434,100 @@ void TestLspCoordinator::testClangdNavigationAndWorkspaceRename() {
     QVERIFY(diagSpy.wait(4000) && diagSpy.count() >= 1);
 }
 
+void TestLspCoordinator::testBoundedJsonRpcFramerAndCompileCommands() {
+    // 1. Direct JsonRpcFramer edge cases: Content-Length: 0, multi-chunk split, back-to-back, oversized rejection, buffer cap.
+    JsonRpcFramer framer(1024, 2048);
+    const QByteArray frameA = JsonRpcFramer::encode(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("id"), 1}});
+    const QByteArray frameB = JsonRpcFramer::encode(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("id"), 2}});
+
+    // Content-Length: 0 must advance cleanly without deadlocking subsequent frames.
+    const QByteArray zeroAndTwo = QByteArray("Content-Length: 0\r\n\r\n") + frameA + frameB;
+    const auto resZero = framer.feed(zeroAndTwo.left(12));
+    QVERIFY(resZero.payloads.isEmpty() && resZero.errors.isEmpty());
+    const auto resRest = framer.feed(zeroAndTwo.mid(12));
+    QCOMPARE(resRest.payloads.size(), 2);
+    QVERIFY(resRest.errors.isEmpty());
+    QCOMPARE(QJsonDocument::fromJson(resRest.payloads[0]).object().value(QStringLiteral("id")).toInt(), 1);
+    QCOMPARE(QJsonDocument::fromJson(resRest.payloads[1]).object().value(QStringLiteral("id")).toInt(), 2);
+    QCOMPARE(framer.bufferedBytes(), 0);
+
+    // Oversized Content-Length must reject cleanly, reset buffer to 0, and allow subsequent valid frames.
+    const auto resOversized = framer.feed("Content-Length: 99999999\r\n\r\n{\"partial\":");
+    QVERIFY(resOversized.payloads.isEmpty());
+    QCOMPARE(resOversized.errors.size(), 1);
+    QCOMPARE(framer.bufferedBytes(), 0);
+    const auto resRecover = framer.feed(frameA);
+    QCOMPARE(resRecover.payloads.size(), 1);
+    QVERIFY(resRecover.errors.isEmpty());
+
+    // Negative/malformed Content-Length discards only the bad header block and continues.
+    const auto resBadHdr = framer.feed(QByteArray("Content-Length: -5\r\n\r\n") + frameB);
+    QCOMPARE(resBadHdr.errors.size(), 1);
+    QCOMPARE(resBadHdr.payloads.size(), 1);
+    QCOMPARE(QJsonDocument::fromJson(resBadHdr.payloads[0]).object().value(QStringLiteral("id")).toInt(), 2);
+
+    // Raw chunk exceeding rolling buffer limit is rejected without accumulating unbounded memory.
+    const auto resBufCap = framer.feed(QByteArray(3000, 'X'));
+    QVERIFY(resBufCap.payloads.isEmpty());
+    QCOMPARE(resBufCap.errors.size(), 1);
+    QCOMPARE(framer.bufferedBytes(), 0);
+
+    // 2. LspCoordinator end-to-end Content-Length: 0 + oversized rejection with protocolError signal.
+    LspCoordinator coord;
+    QSignalSpy errSpy(&coord, &LspCoordinator::protocolError);
+    QJsonObject initResult;
+    initResult["jsonrpc"] = "2.0";
+    initResult["id"] = 1;
+    initResult["result"] = QJsonObject{{"capabilities", QJsonObject()}};
+    coord.processRawOutput(QByteArray("Content-Length: 0\r\n\r\n") + LspCoordinator::formatMessage(initResult));
+    QVERIFY(coord.isInitialized());
+    QCOMPARE(errSpy.count(), 0);
+    coord.processRawOutput("Content-Length: 33554432\r\n\r\n");
+    QCOMPARE(errSpy.count(), 1);
+    QCOMPARE(coord.bufferedBytes(), 0);
+
+    // 3. LspCoordinator::resolveCompileCommandsDir precedence: explicit -> builddir/ -> build/ -> root -> missing.
+    QTemporaryDir tmpRoot;
+    QVERIFY(tmpRoot.isValid());
+    const QString root = tmpRoot.path();
+    const QString srcFile = root + QStringLiteral("/src/main.cpp");
+    const QString builddirPath = root + QStringLiteral("/builddir");
+    const QString buildPath = root + QStringLiteral("/build");
+    const QString customPath = root + QStringLiteral("/custom_cc");
+    QVERIFY(QDir().mkpath(root + QStringLiteral("/src")) && QDir().mkpath(builddirPath) &&
+            QDir().mkpath(buildPath) && QDir().mkpath(customPath));
+    auto touch = [](const QString& path) {
+        QFile f(path);
+        const bool ok = f.open(QIODevice::WriteOnly | QIODevice::Text) && f.write("[]") == 2;
+        f.close();
+        return ok;
+    };
+    QVERIFY(touch(srcFile));
+
+    // Missing compile_commands.json anywhere in tmpRoot returns empty string (unless an ancestor on host has one, check isolated dir only when none).
+    const QString missingResult = LspCoordinator::resolveCompileCommandsDir(srcFile);
+    QVERIFY(missingResult.isEmpty() || !missingResult.startsWith(root));
+
+    // Root fallback.
+    QVERIFY(touch(root + QStringLiteral("/compile_commands.json")));
+    QCOMPARE(QFileInfo(LspCoordinator::resolveCompileCommandsDir(srcFile)).canonicalFilePath(),
+             QFileInfo(root).canonicalFilePath());
+
+    // CMake build/ takes precedence over root.
+    QVERIFY(touch(buildPath + QStringLiteral("/compile_commands.json")));
+    QCOMPARE(QFileInfo(LspCoordinator::resolveCompileCommandsDir(srcFile)).canonicalFilePath(),
+             QFileInfo(buildPath).canonicalFilePath());
+
+    // Meson builddir/ takes precedence over build/.
+    QVERIFY(touch(builddirPath + QStringLiteral("/compile_commands.json")));
+    QCOMPARE(QFileInfo(LspCoordinator::resolveCompileCommandsDir(srcFile)).canonicalFilePath(),
+             QFileInfo(builddirPath).canonicalFilePath());
+
+    // Explicit override takes precedence over builddir/.
+    QVERIFY(touch(customPath + QStringLiteral("/compile_commands.json")));
+    coord.setCompileCommandsDir(customPath);
+    QCOMPARE(QFileInfo(LspCoordinator::resolveCompileCommandsDir(srcFile, coord.compileCommandsDir())).canonicalFilePath(),
+             QFileInfo(customPath).canonicalFilePath());
+}
+
 QTEST_MAIN(TestLspCoordinator)

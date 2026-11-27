@@ -91,4 +91,49 @@ void TestDapParser::testMultipleMessages() {
     }
 }
 
+void TestDapParser::testBoundedFramingAndTraceGating() {
+    DapCoordinator coordinator;
+    QSignalSpy msgSpy(&coordinator, &DapCoordinator::messageReceived);
+    QSignalSpy errSpy(&coordinator, &DapCoordinator::errorOccurred);
+
+    // 1. Content-Length: 0 must advance cleanly without deadlocking the following valid DAP event.
+    const QByteArray validFrame = "Content-Length: 38\r\n\r\n{\"type\":\"event\",\"event\":\"initialized\"}";
+    coordinator.processRawData(QByteArray("Content-Length: 0\r\n\r\n") + validFrame);
+    QCOMPARE(msgSpy.count(), 1);
+    QCOMPARE(errSpy.count(), 0);
+    QCOMPARE(coordinator.bufferedBytes(), 0);
+
+    // 2. Oversized Content-Length (> 16 MiB) must emit errorOccurred, clear buffer, and recover on next frame.
+    msgSpy.clear();
+    coordinator.processRawData("Content-Length: 67108864\r\n\r\n{\"huge\":true}");
+    QCOMPARE(msgSpy.count(), 0);
+    QCOMPARE(errSpy.count(), 1);
+    QCOMPARE(coordinator.bufferedBytes(), 0);
+    coordinator.processRawData(validFrame);
+    QCOMPARE(msgSpy.count(), 1);
+
+    // 3. Verbose [DAP Sniffer] TX/RX logging must be silent by default and enabled only by GRIDLOCK_DAP_TRACE=1.
+    static QStringList s_snifferLogs;
+    s_snifferLogs.clear();
+    const QtMessageHandler prevHandler = qInstallMessageHandler(
+        [](QtMsgType type, const QMessageLogContext&, const QString& msg) {
+            if ((type == QtDebugMsg || type == QtInfoMsg) && msg.contains(QStringLiteral("[DAP Sniffer]"))) {
+                s_snifferLogs.append(msg);
+            }
+        });
+
+    qunsetenv("GRIDLOCK_DAP_TRACE");
+    QVERIFY(!DapCoordinator::isTraceLoggingEnabled());
+    coordinator.processRawData(validFrame);
+    QVERIFY(s_snifferLogs.isEmpty());
+
+    qputenv("GRIDLOCK_DAP_TRACE", "1");
+    QVERIFY(DapCoordinator::isTraceLoggingEnabled());
+    coordinator.processRawData(validFrame);
+    QVERIFY(!s_snifferLogs.isEmpty());
+
+    qunsetenv("GRIDLOCK_DAP_TRACE");
+    qInstallMessageHandler(prevHandler);
+}
+
 QTEST_GUILESS_MAIN(TestDapParser)

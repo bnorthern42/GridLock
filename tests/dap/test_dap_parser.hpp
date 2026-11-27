@@ -33,4 +33,9 @@ private slots:
      * @brief Verifies extraction of multiple back-to-back DAP messages in a single packet.
      */
     void testMultipleMessages();
+
+    /**
+     * @brief Verifies Content-Length: 0 handling, oversized frame rejection, and GRIDLOCK_DAP_TRACE log gating.
+     */
+    void testBoundedFramingAndTraceGating();
 };

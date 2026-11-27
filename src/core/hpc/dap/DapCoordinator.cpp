@@ -15,6 +15,7 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QLoggingCategory>
 #include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QStringList>
@@ -114,6 +115,26 @@ int DapCoordinator::sendRequest(const QString& command,
   return seq;
 }
 
+namespace {
+Q_LOGGING_CATEGORY(lcGridlockDap, "gridlock.dap", QtWarningMsg)
+
+void logDapTrace(const char* prefix, const QJsonObject& payload) {
+  const QByteArray compact = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+  if (lcGridlockDap().isDebugEnabled()) {
+    qCDebug(lcGridlockDap) << prefix << compact;
+  } else {
+    qInfo() << prefix << compact;
+  }
+}
+}  // namespace
+
+bool DapCoordinator::isTraceLoggingEnabled() {
+  if (lcGridlockDap().isDebugEnabled()) return true;
+  if (!qEnvironmentVariableIsSet("GRIDLOCK_DAP_TRACE")) return false;
+  const QByteArray val = qgetenv("GRIDLOCK_DAP_TRACE").trimmed().toLower();
+  return !val.isEmpty() && val != "0" && val != "false";
+}
+
 /**
  * @brief Serializes @p messageObj with a `Content-Length` HTTP header and writes to the adapter.
  */
@@ -123,19 +144,11 @@ void DapCoordinator::sendRawMessage(const QJsonObject& messageObj) {
     return;
   }
 
-  qDebug() << "[DAP Sniffer] TX:"
-           << QJsonDocument(messageObj).toJson(QJsonDocument::Compact);
+  if (isTraceLoggingEnabled()) {
+    logDapTrace("[DAP Sniffer] TX:", messageObj);
+  }
 
-  const QJsonDocument doc(messageObj);
-  const QByteArray jsonBytes = doc.toJson(QJsonDocument::Compact);
-
-  QByteArray message;
-  message.append("Content-Length: ");
-  message.append(QByteArray::number(jsonBytes.size()));
-  message.append("\r\n\r\n");
-  message.append(jsonBytes);
-
-  writeToAdapter(message);
+  writeToAdapter(gridlock::core::JsonRpcFramer::encode(messageObj));
 }
 
 /**
@@ -194,7 +207,7 @@ void DapCoordinator::stopSession(bool silentShutdown) {
     for (auto it = m_rankToPid.constBegin(); it != m_rankToPid.constEnd(); ++it)
       if (it.value() > 0 && it.value() != selfPid && ::kill(it.value(), 0) == 0) ::kill(it.value(), SIGTERM);
   }
-  m_slurmJobId = -1; m_processCount = 0; m_pendingAttachPid = 0; m_buffer.clear();
+  m_slurmJobId = -1; m_processCount = 0; m_pendingAttachPid = 0; m_framer.clear();
   m_rankToPid.clear(); m_activeFrameIds.clear(); m_activeThreadIds.clear();
   m_rankFrames.clear(); m_rankThreads.clear(); m_state = SessionState::Disconnected;
   if (!silentShutdown) {
@@ -211,39 +224,16 @@ void DapCoordinator::readyReadStandardOutput() {
   if (!m_shuttingDown && m_process) processRawData(m_process->readAllStandardOutput());
 }
 
-/** @brief Incrementally extracts `Content-Length` framed JSON payloads and dispatches them in strict FIFO order. */
+/** @brief Incrementally extracts `Content-Length` framed JSON payloads via the bounded framer in strict FIFO order. */
 void DapCoordinator::processRawData(const QByteArray& data) {
   if (m_shuttingDown) return;
-  // Append newly arrived adapter bytes into the rolling stream buffer.
-  m_buffer.append(data);
-  while (!m_shuttingDown) {
-    // Locate the HTTP-style `\r\n\r\n` separator bounding the DAP header block.
-    const int headerEndIndex = m_buffer.indexOf("\r\n\r\n");
-    if (headerEndIndex == -1) break;
-
-    // Parse the `Content-Length` header line (case-insensitive) to determine body byte length.
-    const QString headerString = QString::fromUtf8(m_buffer.left(headerEndIndex));
-    int contentLength = 0;
-    for (const QString& header : headerString.split("\r\n")) {
-      if (header.startsWith("Content-Length:", Qt::CaseInsensitive)) {
-        contentLength = header.mid(15).trimmed().toInt();
-        break;
-      }
-    }
-    if (contentLength <= 0) {
-      // Recover stream synchronization by discarding malformed header blocks.
-      qWarning() << "Invalid or missing Content-Length in DAP header.";
-      m_buffer.remove(0, headerEndIndex + 4);
-      continue;
-    }
-
-    // Defer parsing until the complete UTF-8 JSON body is buffered in memory.
-    const int totalMessageLength = headerEndIndex + 4 + contentLength;
-    if (m_buffer.size() < totalMessageLength) break;
-    const QByteArray payloadData = m_buffer.mid(headerEndIndex + 4, contentLength);
-    m_buffer.remove(0, totalMessageLength);
-
-    // Parse and dispatch each frame sequentially so Frame k+1 can never overtake Frame k.
+  const auto framed = m_framer.feed(data);
+  for (const QString& err : framed.errors) {
+    qWarning() << "[DAP]" << err;
+    emit errorOccurred(err);
+  }
+  for (const QByteArray& payloadData : framed.payloads) {
+    if (m_shuttingDown) break;
     QJsonParseError parseError;
     const QJsonDocument doc = QJsonDocument::fromJson(payloadData, &parseError);
     if (parseError.error != QJsonParseError::NoError) {
@@ -261,11 +251,13 @@ void DapCoordinator::processRawData(const QByteArray& data) {
  * @param message Deserialized DAP JSON envelope (`type`: `"response"` or `"event"`).
  */
 void DapCoordinator::handleMessage(const QJsonObject& message) {
-  // Log incoming DAP traffic for protocol debugging and REPL/watch evaluation inspection.
-  if (message["type"].toString() == "response" && message["command"].toString() == "evaluate") {
-    qDebug() << "[DAP Sniffer] Evaluate Response:" << QJsonDocument(message).toJson(QJsonDocument::Compact);
-  } else {
-    qDebug() << "[DAP Sniffer] RX:" << QJsonDocument(message).toJson(QJsonDocument::Compact);
+  // Log incoming DAP traffic only when opt-in GRIDLOCK_DAP_TRACE or gridlock.dap debug logging is enabled.
+  if (isTraceLoggingEnabled()) {
+    if (message["type"].toString() == "response" && message["command"].toString() == "evaluate") {
+      logDapTrace("[DAP Sniffer] Evaluate Response:", message);
+    } else {
+      logDapTrace("[DAP Sniffer] RX:", message);
+    }
   }
 
   const QString type = message["type"].toString();
@@ -486,7 +478,7 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
  */
 void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
   if (m_shuttingDown) return;
-  qDebug() << "[DAP] FATAL: Adapter process error:" << error << "-" << m_process->errorString();
+  qWarning() << "[DAP] Adapter process error:" << error << "-" << m_process->errorString();
   emit errorOccurred(m_process->errorString());
   m_processCount = 0; m_state = SessionState::Disconnected; emit stateChanged(m_state);
 }
