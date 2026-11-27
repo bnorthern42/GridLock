@@ -7,13 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Optional `qtermwidget6` Dependency & Built-In Qt6 Fallback Terminal (`meson_options.txt`, `meson.build`, `TerminalDockWidget`)**:
-  - Added a `qtermwidget` Meson feature option (`auto` by default, checking `qtermwidget6` and `qtermwidget-qt6`) that automatically falls back to a built-in Qt6 `QPlainTextEdit` + `QProcess` interactive shell terminal (`HAVE_QTERMWIDGET6 == 0`) with ANSI stripping, copy/paste/clear support, and monospace enforcement so GridLock compiles cleanly on HPC clusters (such as TACC Stampede3) where `qtermwidget6` development headers are not installed.
-
 ## [0.9.1] - 2026-11-26
 
 ### Added
+- **Optional `qtermwidget6` Dependency & Built-In Qt6 Fallback Terminal (`meson_options.txt`, `meson.build`, `TerminalDockWidget`)**:
+  - Added a `qtermwidget` Meson feature option (`auto` by default, checking `qtermwidget6` and `qtermwidget-qt6`) that automatically falls back to a built-in Qt6 `QPlainTextEdit` + `QProcess` interactive shell terminal (`HAVE_QTERMWIDGET6 == 0`) with ANSI stripping, copy/paste/clear support, and monospace enforcement so GridLock compiles cleanly on HPC clusters (such as TACC Stampede3) where `qtermwidget6` development headers are not installed.
 - **`LocalSlurmBackend` Submission, Node Discovery & Multi-Rank `gdbserver` Auto-Attach (`LocalSlurmBackend`, `MainWindow`, `MainWindowBuild`, `MainWindowDebugger`, `MainWindowToolbar`, `SpackManager`)**:
   - Added `LocalSlurmBackend` implementing real Slurm batch execution and automatic debugger attachment: stages a per-rank `gdbserver --multi` wrapper (`SLURM_PROCID` / `PMI_RANK` / `OMPI_COMM_WORLD_RANK` bound to `base_port + rank`, default `2345`) inside the shared working directory (never node-local `/tmp`), submits via `sbatch --parsable`, polls `squeue -j <job_id> -h -o "%T"` from `PENDING` / `CONFIGURING` to `RUNNING`, expands allocated hostnames via `scontrol show hostnames`, establishes optional SSH `-L` local port-forwarding tunnels when `SshSettings::host` is configured, attaches `GdbRankCoordinator` in `extended-remote` mode with ranks paused at attach, and runs `scancel <job_id>` on debug stop or teardown.
 - **Offline Slurm Pipeline, `#SBATCH` Parser & `HPC Integration` Persistence Tests (`tests/core/test_config.cpp`, `tests/ui/test_ui_cohesion.cpp`)**:
