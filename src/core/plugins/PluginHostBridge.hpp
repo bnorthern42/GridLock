@@ -6,6 +6,7 @@
 #pragma once
 
 #include "PluginUiModels.hpp"
+#include "../hpc/gdb/LanguageExpressionHelper.hpp"
 #include "gridlock/plugin_api.h"
 
 #include <algorithm>
@@ -101,6 +102,13 @@ inline ParsedContainerType classifyDwarfType(const QString& rawType) {
     out.kind = ContiguousKind::CArray;
     out.elementType = stripOuterQualifiers(am.captured(1));
     out.staticCount = am.captured(2).toULongLong(&out.hasStaticCount, 10);
+    return out;
+  }
+  if (const auto fInfo = gridlock::parseFortranArrayType(stripped); fInfo.isFortranArray) {
+    out.kind = ContiguousKind::CArray;
+    out.elementType = fInfo.elementType;
+    out.staticCount = fInfo.totalElements();
+    out.hasStaticCount = (out.staticCount > 0u);
     return out;
   }
   const int lt = stripped.indexOf(QLatin1Char('<')), gt = stripped.lastIndexOf(QLatin1Char('>'));

@@ -29,6 +29,7 @@
 
 #include "ArrayPlotCanvas.hpp"
 #include "TensorSliceTableModel.hpp"
+#include "../../../core/hpc/gdb/LanguageExpressionHelper.hpp"
 
 class IBackendCoordinator;
 
@@ -156,6 +157,13 @@ public:
     void setMemoryOrder(TensorSliceTableModel::MemoryOrder order);
     /** @brief Returns the active C row-major or Fortran column-major tensor indexing order. */
     TensorSliceTableModel::MemoryOrder memoryOrder() const;
+
+    /** @brief Updates indexing conventions (1-based column-major for Fortran vs 0-based row-major for C/C++). */
+    void setSourceLanguage(gridlock::SourceLanguage lang);
+    /** @brief Returns the active frame source language applied to the plotter. */
+    gridlock::SourceLanguage sourceLanguage() const { return m_activeLanguage; }
+    /** @brief Returns the current language/indexing badge text shown in the dialog. */
+    QString languageBadgeText() const { return m_languageBadge ? m_languageBadge->text() : QString(); }
 
     /** @brief Switches between the graphical Chart view (`false`) and virtualized Tensor Table (`true`). */
     void setTensorTableActive(bool active);
@@ -324,6 +332,7 @@ private:
     void recomputeStats();
 
     ::IBackendCoordinator* m_coordinator = nullptr;
+    gridlock::SourceLanguage m_activeLanguage = gridlock::SourceLanguage::Unknown;
     int m_focusedRank = 0;
     int m_rows = 1;
     int m_cols = 64;
@@ -398,6 +407,7 @@ private:
     TensorSliceTableModel* m_tensorModel = nullptr;
     QTableView* m_tensorTableView = nullptr;
     QLabel* m_statsLabel = nullptr;
+    QLabel* m_languageBadge = nullptr;
     QLabel* m_hoverLabel = nullptr;
     QString m_gnuplotExecutableOverride;
 };

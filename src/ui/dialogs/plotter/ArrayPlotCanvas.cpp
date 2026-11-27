@@ -14,6 +14,7 @@
 #include <QRegularExpression>
 #include <QSet>
 
+#include "../../../core/hpc/gdb/LanguageExpressionHelper.hpp"
 #include "../../../core/managers/ThemeManager.hpp"
 
 namespace gridlock::ui {
@@ -49,7 +50,13 @@ ArraySliceSpec parseArraySliceExpression(const QString& expression) {
     ArraySliceSpec spec;
     const QString trimmed = expression.trimmed();
     spec.baseExpression = trimmed;
-    if (trimmed.isEmpty() || !trimmed.endsWith(QLatin1Char(']'))) return spec;
+    if (trimmed.isEmpty()) return spec;
+    if (trimmed.endsWith(QLatin1Char(')'))) {
+        spec.hasSlice = gridlock::parseFortranSliceSuffix(
+            trimmed, &spec.baseExpression, &spec.offset, &spec.count, &spec.stride, &spec.sliceRows, &spec.sliceCols);
+        return spec;
+    }
+    if (!trimmed.endsWith(QLatin1Char(']'))) return spec;
 
     const int openIdx = trimmed.lastIndexOf(QLatin1Char('['));
     if (openIdx <= 0) return spec;
@@ -384,7 +391,7 @@ void ArrayPlotCanvas::paintHeatmap2D(QPainter& p, const QRect& plotRect, const Q
 
     for (int r = rowMin; r <= rowMax; ++r) {
         for (int c = colMin; c <= colMax; ++c) {
-            const int idx = r * nx + c;
+            const int idx = static_cast<int>(TensorSliceTableModel::computeLinearIndex(c, r, m_owner->zSlice(), nx, ny, m_owner->memoryOrder()));
             const QRectF cellRect(plotRect.left() + (c - colMin) * cellW,
                                   plotRect.top() + (r - rowMin) * cellH,
                                   std::ceil(cellW), std::ceil(cellH));

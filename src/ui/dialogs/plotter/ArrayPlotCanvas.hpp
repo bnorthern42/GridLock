@@ -33,7 +33,9 @@ struct ArraySliceSpec {
     int offset = 0;          ///< Starting element index (`start`, >= 0).
     int count = 0;           ///< Number of strided elements (`<= 0` when end bound is omitted).
     int stride = 1;          ///< Step between consecutive plotted elements (`>= 1`).
-    bool hasSlice = false;   ///< True when trailing `[start:end:stride]` or `[start..end]` was matched.
+    int sliceRows = 0;       ///< Optional 2D slice row count (e.g., Fortran `mat(2:5, 1:4)`).
+    int sliceCols = 0;       ///< Optional 2D slice column count (e.g., Fortran `mat(2:5, 1:4)`).
+    bool hasSlice = false;   ///< True when trailing `[start:end:stride]`, `[start..end]`, or Fortran `(start:end)` was matched.
 };
 
 /**

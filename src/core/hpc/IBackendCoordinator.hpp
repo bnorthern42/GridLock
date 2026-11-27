@@ -20,6 +20,8 @@
 #include <QVariantList>
 #include <QVector>
 
+#include "gdb/LanguageExpressionHelper.hpp"
+
 /**
  * @struct StackFrameEntry
  * @brief Represents a single unwound call-stack frame for an MPI rank thread.
@@ -454,9 +456,18 @@ class IBackendCoordinator : public QObject {
     Q_UNUSED(data);
   }
 
+  /** @brief Returns the active stack-frame source language resolved for @p rank. */
+  virtual gridlock::SourceLanguage activeLanguageForRank(int rank) const {
+    Q_UNUSED(rank);
+    return gridlock::SourceLanguage::Unknown;
+  }
+
  signals:
   /** @brief Emitted when @p rankId stops at @p file and @p line. */
   void locationChanged(int rankId, const QString& file, int line);
+
+  /** @brief Emitted when the resolved source language of @p rank's active frame changes. */
+  void frameLanguageChanged(int rank, gridlock::SourceLanguage language);
 
   /** @brief Emitted strictly on genuine debugger target stops (`*stopped` / `^connected`), never on frame switches. */
   void rankStopped(int rank,

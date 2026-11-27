@@ -188,9 +188,15 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     auto* footerRow = new QHBoxLayout();
     m_statsLabel = new QLabel(QStringLiteral("Min: 0 | Max: 0 | Mean: 0 | L2: 0 | NaN/Inf: 0 | Changed: 0"), this);
     m_statsLabel->setObjectName(QStringLiteral("arrayPlotStatsLabel"));
+    m_languageBadge = new QLabel(gridlock::sourceLanguageLabel(m_activeLanguage), this);
+    m_languageBadge->setObjectName(QStringLiteral("arrayPlotLanguageBadge"));
+    m_languageBadge->setStyleSheet(QStringLiteral(
+        "QLabel#arrayPlotLanguageBadge { padding: 1px 6px; border-radius: 3px; font-weight: 600; "
+        "background-color: rgba(56, 189, 248, 0.16); color: #38bdf8; }"));
     m_hoverLabel = new QLabel(QStringLiteral("Drag to zoom, double-click to reset, hover to inspect values"), this);
     m_hoverLabel->setObjectName(QStringLiteral("arrayPlotHoverLabel"));
     footerRow->addWidget(m_statsLabel, 1);
+    footerRow->addWidget(m_languageBadge);
     footerRow->addWidget(m_hoverLabel);
     root->addLayout(footerRow);
 
@@ -228,8 +234,15 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
         m_tensorModel->setShape(m_cols, m_rows, m_depth);
     });
     connect(m_zSliceSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int z) { m_tensorModel->setZSlice(z); });
-    connect(m_memoryOrderCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { m_tensorModel->setMemoryOrder(memoryOrder()); });
-    connect(m_offsetSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int off) { m_sliceOffset = qMax(0, off); if (m_canvas) m_canvas->update(); });
+    connect(m_memoryOrderCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        m_tensorModel->setMemoryOrder(memoryOrder());
+        if (m_canvas) m_canvas->update();
+    });
+    connect(m_offsetSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int off) {
+        const int base = (m_activeLanguage == gridlock::SourceLanguage::Fortran) ? 1 : 0;
+        m_sliceOffset = qMax(0, off - base);
+        if (m_canvas) m_canvas->update();
+    });
     connect(m_strideSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int str) { m_sliceStride = qMax(1, str); if (m_canvas) m_canvas->update(); });
     connect(m_logScaleCheck, &QCheckBox::toggled, this, [this](bool enabled) { if (m_canvas) m_canvas->setLogScale(enabled); });
     connect(m_resetZoomBtn, &QPushButton::clicked, this, &ArrayPlotDialog::resetZoom);
@@ -302,6 +315,11 @@ void ArrayPlotDialog::setCoordinator(::IBackendCoordinator* coordinator) {
                 double val = 0.0;
                 if (parseScalarResult(result, &val)) appendScalarSample(val, rankId);
             });
+    connect(m_coordinator, &IBackendCoordinator::frameLanguageChanged, this,
+            [this](int rankId, gridlock::SourceLanguage lang) {
+                if (rankId == m_focusedRank) setSourceLanguage(lang);
+            });
+    setSourceLanguage(m_coordinator->activeLanguageForRank(m_focusedRank));
     if (auto* gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
         connect(gdb, &gridlock::GdbRankCoordinator::rankStateChanged, this,
                 [this](int rankId, const gridlock::RankState& state) {
@@ -321,7 +339,9 @@ ArraySliceSpec ArrayPlotDialog::syncSliceControlsFromExpression() {
         setSliceOffset(spec.offset);
         setSliceStride(spec.stride);
         m_hasExplicitSliceCount = (spec.count > 0);
-        if (spec.count > 0) {
+        if (spec.sliceRows > 0 && spec.sliceCols > 0) {
+            setDimensions(spec.sliceRows, spec.sliceCols);
+        } else if (spec.count > 0) {
             m_cols = spec.count;
             if (m_colsSpin && m_colsSpin->value() != m_cols) { QSignalBlocker b(m_colsSpin); m_colsSpin->setValue(m_cols); }
             if (m_tensorModel) m_tensorModel->setShape(m_cols, m_rows, m_depth);
@@ -343,13 +363,20 @@ void ArrayPlotDialog::setElementType(ElementType type) {
 }
 
 void ArrayPlotDialog::setElementTypeFromString(const QString& cType) {
-    const QString lower = cType.toLower();
-    if (lower.contains(QStringLiteral("complex64")) || (lower.contains(QStringLiteral("complex")) && lower.contains(QStringLiteral("float")))) setElementType(ElementType::Complex64);
+    QString lower = cType.toLower();
+    if (const auto fArr = gridlock::parseFortranArrayType(cType); fArr.isFortranArray) {
+        lower = fArr.elementType.toLower();
+        setSourceLanguage(gridlock::SourceLanguage::Fortran);
+        if (fArr.dims.size() == 1) setTensorDimensions(fArr.dims[0].extent(), 1, 1);
+        else if (fArr.dims.size() == 2) setTensorDimensions(fArr.dims[1].extent(), fArr.dims[0].extent(), 1);
+        else if (fArr.dims.size() >= 3) setTensorDimensions(fArr.dims[1].extent(), fArr.dims[0].extent(), fArr.dims[2].extent());
+    }
+    if (lower.contains(QStringLiteral("complex64")) || (lower.contains(QStringLiteral("complex")) && (lower.contains(QStringLiteral("float")) || lower.contains(QStringLiteral("kind=4")) || lower.contains(QStringLiteral("*8"))))) setElementType(ElementType::Complex64);
     else if (lower.contains(QStringLiteral("complex"))) setElementType(ElementType::Complex128);
-    else if (lower.contains(QStringLiteral("float"))) setElementType(ElementType::Float32);
+    else if (lower.contains(QStringLiteral("float")) || lower.contains(QStringLiteral("real(kind=4)")) || lower.contains(QStringLiteral("real*4"))) setElementType(ElementType::Float32);
     else if (lower.contains(QStringLiteral("uint8")) || lower.contains(QStringLiteral("uchar")) || lower.contains(QStringLiteral("char"))) setElementType(ElementType::UInt8);
-    else if (lower.contains(QStringLiteral("int64")) || lower.contains(QStringLiteral("long"))) setElementType(ElementType::Int64);
-    else if (lower.contains(QStringLiteral("int"))) setElementType(ElementType::Int32);
+    else if (lower.contains(QStringLiteral("int64")) || lower.contains(QStringLiteral("long")) || lower.contains(QStringLiteral("integer(kind=8)")) || lower.contains(QStringLiteral("integer*8"))) setElementType(ElementType::Int64);
+    else if (lower.contains(QStringLiteral("int")) || lower.contains(QStringLiteral("integer"))) setElementType(ElementType::Int32);
     else setElementType(ElementType::Float64);
 }
 
@@ -415,11 +442,33 @@ void ArrayPlotDialog::setMemoryOrder(TensorSliceTableModel::MemoryOrder order) {
         if (const int idx = m_memoryOrderCombo->findData(static_cast<int>(order)); idx >= 0) m_memoryOrderCombo->setCurrentIndex(idx);
     }
     if (m_tensorModel) m_tensorModel->setMemoryOrder(order);
+    if (m_canvas) m_canvas->update();
 }
 TensorSliceTableModel::MemoryOrder ArrayPlotDialog::memoryOrder() const {
     return m_memoryOrderCombo
                ? static_cast<TensorSliceTableModel::MemoryOrder>(m_memoryOrderCombo->currentData().toInt())
                : TensorSliceTableModel::MemoryOrder::CRowMajor;
+}
+
+void ArrayPlotDialog::setSourceLanguage(gridlock::SourceLanguage lang) {
+    const bool wasFortran = (m_activeLanguage == gridlock::SourceLanguage::Fortran);
+    const bool isFortran = (lang == gridlock::SourceLanguage::Fortran);
+    m_activeLanguage = lang;
+    if (m_languageBadge) m_languageBadge->setText(gridlock::sourceLanguageLabel(lang));
+    if (m_exprEdit) {
+        m_exprEdit->setPlaceholderText(
+            isFortran ? QStringLiteral("Expr or slice (e.g., arr(1:64), mat(2:5, 1:4))...")
+                      : QStringLiteral("Expr or slice (e.g., u[16:128:2], data[0], residual)..."));
+    }
+    if (m_offsetSpin) {
+        QSignalBlocker b(m_offsetSpin);
+        const int base = isFortran ? 1 : 0;
+        m_offsetSpin->setMinimum(base);
+        m_offsetSpin->setValue(m_sliceOffset + base);
+    }
+    if (m_tensorModel) m_tensorModel->setIndexBase(isFortran ? 1 : 0);
+    if (isFortran) setMemoryOrder(TensorSliceTableModel::MemoryOrder::FortranColMajor);
+    else if (wasFortran) setMemoryOrder(TensorSliceTableModel::MemoryOrder::CRowMajor);
 }
 
 void ArrayPlotDialog::setTensorTableActive(bool active) {
@@ -431,7 +480,11 @@ bool ArrayPlotDialog::isTensorTableActive() const { return m_viewStack && m_view
 
 void ArrayPlotDialog::setSliceOffset(int offset) {
     m_sliceOffset = qMax(0, offset);
-    if (m_offsetSpin && m_offsetSpin->value() != m_sliceOffset) { QSignalBlocker b(m_offsetSpin); m_offsetSpin->setValue(m_sliceOffset); }
+    const int base = (m_activeLanguage == gridlock::SourceLanguage::Fortran) ? 1 : 0;
+    if (m_offsetSpin && m_offsetSpin->value() != m_sliceOffset + base) {
+        QSignalBlocker b(m_offsetSpin);
+        m_offsetSpin->setValue(m_sliceOffset + base);
+    }
     if (m_canvas) m_canvas->update();
 }
 void ArrayPlotDialog::setSliceStride(int stride) {
@@ -497,8 +550,7 @@ void ArrayPlotDialog::refreshPlot() {
         const int elemCount = qMax(1, m_depth) * qMax(1, m_rows) * qMax(1, m_cols);
         const int spanElems = m_sliceOffset + (elemCount - 1) * qMax(1, m_sliceStride) + 1;
         const int totalBytes = spanElems * byteSizeOf(elementType());
-        const QString addrExpr = (baseExpr.startsWith(QLatin1Char('&')) || baseExpr.startsWith(QStringLiteral("0x")))
-                                     ? baseExpr : QStringLiteral("&(%1)[0]").arg(baseExpr);
+        const QString addrExpr = gridlock::formatArrayBaseAddressExpression(baseExpr, m_activeLanguage);
 
         if (isOverlayRanksEnabled() && plotMode() != PlotMode::Heatmap2D && m_rows == 1 && m_depth == 1) {
             m_pendingOverlayRanks.clear();

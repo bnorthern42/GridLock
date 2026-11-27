@@ -164,7 +164,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       static const QRegularExpression exitCodeRe(QStringLiteral("exit-code=\"([^\"]+)\""));
       const auto ecMatch = exitCodeRe.match(line);
       const QString exitSuffix = ecMatch.hasMatch() ? QStringLiteral(" (exit-code %1)").arg(ecMatch.captured(1)) : QString();
-      rp->inferiorPid = 0; m_rankPids.remove(rankId);
+      rp->inferiorPid = 0; m_rankPids.remove(rankId); m_rankLanguage.remove(rankId);
       rp->pendingAttach = false; rp->autoContinueAfterPending = false; rp->pendingAfterStopCmds.clear();
       if (rp->state.executionTimer.isValid()) {
         rp->state.totalRuntimeMs += rp->state.executionTimer.elapsed();
@@ -285,6 +285,11 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         if (isNonX86Arch && !m_archRegisterNames.contains(frameArch)) writeCmd(rankId, QStringLiteral("214-data-list-register-names\n"));
         writeCmd(rankId, "-data-list-register-values r\n");
         writeCmd(rankId, "201-stack-list-variables --simple-values\n");
+        if (const SourceLanguage fileLang = detectSourceLanguageFromFile(rp->state.currentFile);
+            fileLang != SourceLanguage::Unknown) {
+          updateRankLanguage(rankId, fileLang);
+        }
+        writeCmd(rankId, QStringLiteral("215-gdb-show language\n"));
         static const QRegularExpression threadRe("thread-id=\"(\\d+)\""), reasonRe("reason=\"([^\"]+)\"");
         const auto matchThread = threadRe.match(line), matchReason = reasonRe.match(line);
         writeCmd(rankId, matchThread.hasMatch() ? QString("-thread-select %1\n").arg(matchThread.captured(1)) : QStringLiteral("-thread-info\n"));
@@ -339,7 +344,13 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         writeCmd(rankId, QStringLiteral("-data-list-register-values r\n"));
       }
     } else if (line.startsWith("*running")) {
+      m_rankLanguage.remove(rankId);
       rp->state.currentState = "running"; rp->state.executionTimer.start(); emit rankStateChanged(rankId, rp->state);
+    } else if (line.startsWith(QLatin1String("215^done"))) {
+      static const QRegularExpression langValRe(QStringLiteral("value=\"((?:\\\\.|[^\"])*)\""));
+      const auto lm = langValRe.match(line);
+      const QString rawVal = lm.hasMatch() ? detail::unescapeMiValue(lm.captured(1)) : QString();
+      updateRankLanguage(rankId, detectSourceLanguageFromGdbShow(rawVal, rp->state.currentFile));
     } else if (line.startsWith("30")) {
       if (line.contains("^done")) {
         static const QRegularExpression evalRe("30(\\d+)\\^done,name=\"([^\"]+)\".*?value=\"([^\"]+)\"");

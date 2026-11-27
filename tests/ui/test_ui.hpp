@@ -222,5 +222,8 @@ private slots:
 
     /** @brief Verifies PROJECT / SYMBOLS FILES recursive fuzzy search, auto-expand, ignored build dirs, and collapsed restore on clear. */
     void testProjectFilesFuzzySearch();
+
+    /** @brief Verifies Fortran frame detection switches ArrayPlotDialog to 1-based bounds, Fortran badge, and column-major layout. */
+    void testFortranFrameDetectionAndColumnMajorPlotter();
 };
 

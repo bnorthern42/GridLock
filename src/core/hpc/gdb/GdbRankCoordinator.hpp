@@ -157,6 +157,14 @@ class GdbRankCoordinator : public IBackendCoordinator {
 
   int activeLaneForRank(int rank) const { return m_activeLaneIds.value(rank, -1); }
   QString activeArchitectureForRank(int rank) const { return m_rankArch.value(rank); }
+  SourceLanguage activeLanguageForRank(int rank) const override {
+    return m_rankLanguage.value(rank, SourceLanguage::Unknown);
+  }
+  void updateRankLanguage(int rankId, SourceLanguage lang) {
+    if (m_rankLanguage.value(rankId, SourceLanguage::Unknown) == lang) return;
+    m_rankLanguage[rankId] = lang;
+    emit frameLanguageChanged(rankId, lang);
+  }
 
  signals:
   void rankStateChanged(int rankId, const RankState& state);
@@ -381,6 +389,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QVector<BreakpointSpec> m_regexCreatedBreakpoints;
   QMap<int, QVector<ProcessCheckpoint>> m_rankCheckpoints;
   QMap<QString, QHash<int, QString>> m_archRegisterNames;
+  QMap<int, SourceLanguage> m_rankLanguage;
 };
 
 inline void GdbRankCoordinator::startDebugSession(int rankCount, const QString& executable) {

@@ -713,3 +713,86 @@ void TestMainWindowUI::testGdbConsoleReadlineErgonomics() {
     edit->setText(QStringLiteral("b ma")); edit->setCursorPosition(4); QTest::keyClick(edit, Qt::Key_Tab); coord.processGdbOutput(0, QStringLiteral("~\"b main\\n\"\n~\"b malloc\\n\"\n211^done\n"));
     QVERIFY(console.completionPopup()->isVisible() && console.completionPopup()->count() == 2); QTest::keyClick(edit, Qt::Key_Down); QTest::keyClick(edit, Qt::Key_Return); QVERIFY(!console.completionPopup()->isVisible() && edit->text() == QStringLiteral("b malloc"));
 }
+
+void TestMainWindowUI::testFortranFrameDetectionAndColumnMajorPlotter() {
+    using gridlock::SourceLanguage;
+    using gridlock::ui::ArrayPlotDialog;
+    using gridlock::ui::TensorSliceTableModel;
+
+    gridlock::GdbRankCoordinator coord;
+    coord.initializeMockSession(1);
+    QStringList sentCmds;
+    connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, this,
+            [&](int /*rank*/, const QString& cmd) { sentCmds.append(cmd.trimmed()); });
+
+    ArrayPlotDialog dlg(&coord);
+    dlg.resize(980, 600);
+    dlg.show();
+    QApplication::processEvents();
+
+    auto* offsetSpin = dlg.findChild<QSpinBox*>(QStringLiteral("arrayPlotOffsetSpin"));
+    auto* badge = dlg.findChild<QLabel*>(QStringLiteral("arrayPlotLanguageBadge"));
+    QVERIFY(offsetSpin != nullptr && badge != nullptr);
+    QCOMPARE(offsetSpin->minimum(), 0);
+    QCOMPARE(dlg.memoryOrder(), TensorSliceTableModel::MemoryOrder::CRowMajor);
+    QCOMPARE(badge->text(), QStringLiteral("C/C++ (0-based, row-major)"));
+
+    // Simulate stopping in a Fortran frame (`solver.f90`) and GDB `-gdb-show language` reply.
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401200\",func=\"jacobi_step\","
+                       "fullname=\"/tmp/solver.f90\",line=\"42\",args=[]}\n"));
+    QVERIFY(sentCmds.contains(QStringLiteral("215-gdb-show language")));
+    coord.processGdbOutput(0, QStringLiteral("215^done,value=\"fortran\"\n"));
+    QApplication::processEvents();
+
+    QCOMPARE(coord.activeLanguageForRank(0), SourceLanguage::Fortran);
+    QCOMPARE(dlg.sourceLanguage(), SourceLanguage::Fortran);
+    QCOMPARE(dlg.memoryOrder(), TensorSliceTableModel::MemoryOrder::FortranColMajor);
+    QCOMPARE(offsetSpin->minimum(), 1);
+    QCOMPARE(offsetSpin->value(), 1);
+    QCOMPARE(badge->text(), QStringLiteral("Fortran (1-based, column-major)"));
+
+    // Verify 1-based Fortran headers and column-major indexing in TensorSliceTableModel.
+    auto* tm = dlg.tensorTableModel();
+    QVERIFY(tm != nullptr);
+    QCOMPARE(tm->indexBase(), 1);
+    dlg.setElementTypeFromString(QStringLiteral("real(kind=8) (2,3)"));
+    QCOMPARE(dlg.elementType(), ArrayPlotDialog::ElementType::Float64);
+    QCOMPARE(dlg.rows(), 2);
+    QCOMPARE(dlg.cols(), 3);
+    // Column-major memory for a 2x3 matrix: col 1 = [10, 20], col 2 = [30, 40], col 3 = [50, 60].
+    dlg.setSamples({10.0, 20.0, 30.0, 40.0, 50.0, 60.0}, 2, 3);
+    QCOMPARE(tm->headerData(0, Qt::Horizontal).toString(), QStringLiteral("(1)"));
+    QCOMPARE(tm->headerData(1, Qt::Vertical).toString(), QStringLiteral("(2)"));
+    QCOMPARE(tm->cellValue(0, 0), 10.0);
+    QCOMPARE(tm->cellValue(1, 0), 20.0);
+    QCOMPARE(tm->cellValue(0, 1), 30.0);
+    QCOMPARE(tm->cellValue(1, 2), 60.0);
+
+    // Verify Fortran 1-based slice parsing (`vec(2:5)`) and Fortran base-address expression `&(vec)`.
+    sentCmds.clear();
+    dlg.setDimensions(1, 4); dlg.setExpression(QStringLiteral("vec(2:5)"));
+    QCOMPARE(dlg.baseExpression(), QStringLiteral("vec"));
+    QCOMPARE(dlg.sliceOffset(), 1);
+    QCOMPARE(offsetSpin->value(), 2);
+    QCOMPARE(dlg.cols(), 4);
+    dlg.refreshPlot();
+    QVERIFY(sentCmds.contains(QStringLiteral("-data-read-memory-bytes &(vec) 40")));
+
+    // Verify resuming clears cached language and switching to a C++ frame restores 0-based row-major mode.
+    coord.processGdbOutput(0, QStringLiteral("*running,thread-id=\"all\"\n"));
+    QCOMPARE(coord.activeLanguageForRank(0), SourceLanguage::Unknown);
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x402000\",func=\"main\","
+                       "fullname=\"/tmp/main.cpp\",line=\"18\",args=[]}\n"));
+    coord.processGdbOutput(0, QStringLiteral("215^done,value=\"c++\"\n"));
+    QApplication::processEvents();
+    QCOMPARE(dlg.sourceLanguage(), SourceLanguage::Cpp);
+    QCOMPARE(dlg.memoryOrder(), TensorSliceTableModel::MemoryOrder::CRowMajor);
+    QCOMPARE(offsetSpin->minimum(), 0);
+    QCOMPARE(tm->indexBase(), 0);
+    QCOMPARE(badge->text(), QStringLiteral("C/C++ (0-based, row-major)"));
+    dlg.close();
+}

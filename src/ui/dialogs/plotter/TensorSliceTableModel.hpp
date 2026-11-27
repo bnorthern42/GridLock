@@ -73,6 +73,11 @@ public:
     /** @brief Returns the active memory layout order. */
     MemoryOrder memoryOrder() const { return m_memoryOrder; }
 
+    /** @brief Sets the displayed coordinate index base (`0` for C/C++, `1` for Fortran). */
+    void setIndexBase(int base);
+    /** @brief Returns the active displayed coordinate index base (`0` or `1`). */
+    int indexBase() const { return m_indexBase; }
+
     /**
      * @brief Computes the 0-based linear element offset for `(x, y, z)` under `order`.
      */
@@ -107,6 +112,7 @@ private:
     int m_ny = 0;
     int m_nz = 1;
     int m_zSlice = 0;
+    int m_indexBase = 0;
     MemoryOrder m_memoryOrder = MemoryOrder::CRowMajor;
 };
 

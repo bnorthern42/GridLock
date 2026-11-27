@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Fortran (`gfortran` / `ifx`) Frame Detection, 1-Based Slicing & Column-Major Inspection (`LanguageExpressionHelper`, `GdbRankCoordinator`, `GdbMiParser`, `GdbRankInspection`, `ArrayPlotDialog`, `ArrayPlotCanvas`, `TensorSliceTableModel`, `PluginHostBridge`)**:
+  - Added per-rank `SourceLanguage` tracking (`Unknown`, `C`, `Cpp`, `Fortran`) resolved from GDB/MI `-gdb-show language` and frame filename extensions (`.f`, `.for`, `.f90`, `.f95`, `.f03`, `.f08`, `.F90`), automatically refreshed on stops/frame switches and cleared on resume.
+  - Added `LanguageExpressionHelper.hpp` for Fortran 1-based inclusive slice formatting (`vec(1:16)`, `mat(2:5, 1:4)`), Fortran base-address evaluation (`&(arr)` without C `[0]` subscripting), GDB Fortran array type/bounds parsing (`real(kind=8) (10,20)`, `integer(kind=4) (0:9,1:5)`), generalized N-D column-major vs. row-major indexing, and contiguous-range resolution in `PluginHostBridge`.
+  - Updated `ArrayPlotDialog`, `ArrayPlotCanvas`, and `TensorSliceTableModel` to display a live `Fortran (1-based, column-major)` / `C/C++ (0-based, row-major)` badge, switch offset spinboxes and table headers to 1-based bounds on Fortran frames, parse Fortran `(start:end)` and `(r1:r2, c1:c2)` slices, and render 2D heatmaps and tensor tables in column-major order.
+
 ## [0.9.1] - 2026-11-26
 
 ### Added

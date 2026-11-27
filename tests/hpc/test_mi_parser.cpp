@@ -10,6 +10,7 @@
 #include <QString>
 #include <QtTest/QtTest>
 
+#include "../../src/core/hpc/gdb/LanguageExpressionHelper.hpp"
 #include "../../src/ui/GdbConsoleWidget.hpp"
 
 using namespace gridlock::ui;
@@ -88,6 +89,88 @@ private slots:
 
         QString outputRaw = GdbConsoleWidget::formatLogEntry(2, "^done", false, true);
         QCOMPARE(outputRaw, QString("[GDB OUT Rank 2]: ^done"));
+    }
+
+    /**
+     * @brief Verifies Fortran vs C/C++ language detection, 1-based slicing, GDB type/bounds parsing,
+     *        and column-major vs row-major linear indexing.
+     */
+    void testFortranLanguageSlicingAndColumnMajorHelpers() {
+        using namespace gridlock;
+
+        // 1. Language detection from -gdb-show language and filename fallback.
+        QCOMPARE(detectSourceLanguageFromGdbShow(QStringLiteral("fortran")), SourceLanguage::Fortran);
+        QCOMPARE(detectSourceLanguageFromGdbShow(QStringLiteral("c++")), SourceLanguage::Cpp);
+        QCOMPARE(detectSourceLanguageFromGdbShow(QStringLiteral("c")), SourceLanguage::C);
+        QCOMPARE(detectSourceLanguageFromGdbShow(QStringLiteral("auto"), QStringLiteral("/work/heat_solver.f90")),
+                 SourceLanguage::Fortran);
+        QCOMPARE(detectSourceLanguageFromGdbShow(QStringLiteral("auto"), QStringLiteral("/work/kernel.F90")),
+                 SourceLanguage::Fortran);
+        QCOMPARE(detectSourceLanguageFromGdbShow(QStringLiteral("auto"), QStringLiteral("/work/mesh.cpp")),
+                 SourceLanguage::Cpp);
+        QCOMPARE(detectSourceLanguageFromGdbShow(QStringLiteral("The current source language is \"auto; currently fortran\".")),
+                 SourceLanguage::Fortran);
+
+        // 2. Fortran 1-based slice expression generation vs C/C++ 0-based slicing.
+        QCOMPARE(formatArraySliceExpression(QStringLiteral("vec"), 0, 16, SourceLanguage::Fortran),
+                 QStringLiteral("vec(1:16)"));
+        QCOMPARE(formatArraySliceExpression(QStringLiteral("vec"), 0, 8, SourceLanguage::Fortran, 2),
+                 QStringLiteral("vec(1:15:2)"));
+        QCOMPARE(format2DArraySliceExpression(QStringLiteral("mat"), 1, 4, 0, 4, SourceLanguage::Fortran),
+                 QStringLiteral("mat(2:5, 1:4)"));
+        QCOMPARE(formatArraySliceExpression(QStringLiteral("vec"), 0, 16, SourceLanguage::Cpp),
+                 QStringLiteral("vec[0]@16"));
+        QCOMPARE(formatArraySliceExpression(QStringLiteral("vec"), 0, 8, SourceLanguage::C, 2),
+                 QStringLiteral("vec[0:16:2]"));
+        QCOMPARE(formatArrayBaseAddressExpression(QStringLiteral("field"), SourceLanguage::Fortran),
+                 QStringLiteral("&(field)"));
+        QCOMPARE(formatArrayBaseAddressExpression(QStringLiteral("field"), SourceLanguage::Cpp),
+                 QStringLiteral("&(field)[0]"));
+
+        // 3. Fortran GDB type & bounds parsing (default 1-based and explicit lower bounds).
+        const auto t1 = parseFortranArrayType(QStringLiteral("real(kind=8) (3,4)"));
+        QVERIFY(t1.isFortranArray);
+        QCOMPARE(t1.elementType, QStringLiteral("real(kind=8)"));
+        QCOMPARE(t1.dims.size(), 2);
+        QCOMPARE(t1.dims[0].lowerBound, 1);
+        QCOMPARE(t1.dims[0].upperBound, 3);
+        QCOMPARE(t1.dims[1].lowerBound, 1);
+        QCOMPARE(t1.dims[1].upperBound, 4);
+        QCOMPARE(t1.totalElements(), uint64_t{12});
+
+        const auto t2 = parseFortranArrayType(QStringLiteral("integer(kind=4) (0:2, 1:4)"));
+        QVERIFY(t2.isFortranArray);
+        QCOMPARE(t2.elementType, QStringLiteral("integer(kind=4)"));
+        QCOMPARE(t2.dims.size(), 2);
+        QCOMPARE(t2.dims[0].lowerBound, 0);
+        QCOMPARE(t2.dims[0].upperBound, 2);
+        QCOMPARE(t2.dims[0].extent(), 3);
+        QCOMPARE(t2.dims[1].lowerBound, 1);
+        QCOMPARE(t2.dims[1].upperBound, 4);
+        QCOMPARE(t2.dims[1].extent(), 4);
+        QCOMPARE(t2.totalElements(), uint64_t{12});
+
+        // 4. Column-major vs row-major N-D element lookup.
+        // 3x4 matrix at (row=2, col=1): Fortran col-major = 2 + 1*3 = 5; C row-major = 2*4 + 1 = 9.
+        QCOMPARE(computeColumnMajorLinearIndex({2, 1}, {3, 4}), uint64_t{5});
+        QCOMPARE(computeRowMajorLinearIndex({2, 1}, {3, 4}), uint64_t{9});
+        // 3D (2, 3, 4) at (1, 2, 1): Fortran = 1 + 2*2 + 1*(2*3) = 11; C = 1*(3*4) + 2*4 + 1 = 21.
+        QCOMPARE(computeColumnMajorLinearIndex({1, 2, 1}, {2, 3, 4}), uint64_t{11});
+        QCOMPARE(computeRowMajorLinearIndex({1, 2, 1}, {2, 3, 4}), uint64_t{21});
+
+        // 5. Fortran 1D and 2D slice suffix parsing.
+        QString base;
+        int off = 0, cnt = 0, str = 1, rows = 0, cols = 0;
+        QVERIFY(parseFortranSliceSuffix(QStringLiteral("arr(2:9:2)"), &base, &off, &cnt, &str, &rows, &cols));
+        QCOMPARE(base, QStringLiteral("arr"));
+        QCOMPARE(off, 1);
+        QCOMPARE(cnt, 4);
+        QCOMPARE(str, 2);
+
+        QVERIFY(parseFortranSliceSuffix(QStringLiteral("mat(2:5, 1:4)"), &base, &off, &cnt, &str, &rows, &cols));
+        QCOMPARE(base, QStringLiteral("mat"));
+        QCOMPARE(rows, 4);
+        QCOMPARE(cols, 4);
     }
 };
 

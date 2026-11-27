@@ -505,6 +505,8 @@ void GdbRankCoordinator::selectStackFrame(int rank, int threadId, int frameLevel
     }
   }
   writeCmd(rank, QStringLiteral("-stack-select-frame %1\n").arg(clampedFrame));
+  m_rankLanguage.remove(rank);
+  writeCmd(rank, QStringLiteral("215-gdb-show language\n"));
   writeCmd(rank, QStringLiteral("201-stack-list-variables --simple-values\n"));
   writeCmd(rank, QStringLiteral("-data-list-register-values r\n"));
 
@@ -516,6 +518,10 @@ void GdbRankCoordinator::selectStackFrame(int rank, int threadId, int frameLevel
   for (const auto& frame : m_rankFrames.value(rank)) {
     if (frame.level == clampedFrame) {
       rp->state.currentFunction = frame.function;
+      if (const SourceLanguage fileLang = detectSourceLanguageFromFile(frame.file);
+          fileLang != SourceLanguage::Unknown) {
+        updateRankLanguage(rank, fileLang);
+      }
       if (frame.address != 0ULL) {
         const QString hexAddr = QStringLiteral("0x%1").arg(frame.address, 0, 16);
         rp->state.registers[16] = hexAddr;

@@ -54,6 +54,15 @@ void TensorSliceTableModel::setMemoryOrder(MemoryOrder order) {
     notifyDataRefreshed();
 }
 
+void TensorSliceTableModel::setIndexBase(int base) {
+    const int clamped = (base >= 1) ? 1 : 0;
+    if (m_indexBase == clamped) return;
+    m_indexBase = clamped;
+    if (m_nx > 0) emit headerDataChanged(Qt::Horizontal, 0, m_nx - 1);
+    if (m_ny > 0) emit headerDataChanged(Qt::Vertical, 0, m_ny - 1);
+    notifyDataRefreshed();
+}
+
 qsizetype TensorSliceTableModel::computeLinearIndex(int x, int y, int z, int nx, int ny,
                                                     MemoryOrder order) {
     const qsizetype lx = qMax(0, x);
@@ -98,10 +107,9 @@ int TensorSliceTableModel::columnCount(const QModelIndex& parent) const {
 }
 
 QVariant TensorSliceTableModel::headerData(int section, Qt::Orientation orientation, int role) const {
+    Q_UNUSED(orientation);
     if (role != Qt::DisplayRole) return {};
-    if (orientation == Qt::Horizontal) {
-        return QStringLiteral("[%1]").arg(section);
-    }
+    if (m_indexBase == 1) return QStringLiteral("(%1)").arg(section + 1);
     return QStringLiteral("[%1]").arg(section);
 }
 
@@ -152,9 +160,9 @@ QVariant TensorSliceTableModel::data(const QModelIndex& index, int role) const {
                                          : QStringLiteral("C Row-Major");
             QString tip = QStringLiteral("[%1] (z=%2, y=%3, x=%4, %5) = %6")
                               .arg(linIdx)
-                              .arg(m_zSlice)
-                              .arg(r)
-                              .arg(c)
+                              .arg(m_zSlice + m_indexBase)
+                              .arg(r + m_indexBase)
+                              .arg(c + m_indexBase)
                               .arg(orderTag, QString::number(val, 'g', 12));
             if (m_complexPairs && linIdx < m_complexPairs->size()) {
                 const auto [re, im] = m_complexPairs->at(linIdx);
