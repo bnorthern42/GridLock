@@ -27,6 +27,7 @@
 
 #include "../RankState.hpp"
 #include "../core/hpc/gdb/GdbRankCoordinator.hpp"
+#include "../core/hpc/system/LocalSlurmBackend.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/ShortcutManager.hpp"
@@ -467,6 +468,11 @@ bool MainWindow::continueExecutionWorkflow() {
 /** @brief Terminates the active debugging session, reaps child ranks, and restores static ELF inspection. */
 void MainWindow::stopTargetWorkflow() {
     m_debugSessionActive = false; m_remoteAttachSession = false; m_rankLoopCounter.clear();
+    if (!m_attachingSlurmJob && m_hpcBackend) {
+        if (auto* slurm = dynamic_cast<gridlock::core::LocalSlurmBackend*>(m_hpcBackend); slurm && slurm->isJobActive()) {
+            slurm->cancelActiveJob();
+        }
+    }
     if (m_isShuttingDown || m_isClosing) {
         if (m_runAction) m_runAction->setChecked(false);
         if (m_coordinator) m_coordinator->terminateSession();

@@ -130,21 +130,39 @@ void ConfigManager::saveSshSettings(const SshSettings& ss) {
 
 // ─── SLURM / Spack settings ─────────────────────────────────────────────────
 
-/** @brief Retrieves SLURM batch allocation and remote Spack root settings. */
+/** @brief Retrieves SLURM batch allocation, tool paths, and remote Spack root settings. */
 SlurmSettings ConfigManager::getSlurmSettings() const {
   QSettings s(kOrg, kApp);
   SlurmSettings sl;
   sl.scriptTemplate = s.value("slurm/script_template", "").toString();
   sl.partition = s.value("slurm/partition", "batch").toString();
-  sl.nodes = s.value("slurm/nodes", 1).toInt();
-  sl.tasksPerNode = s.value("slurm/tasks_per_node", 4).toInt();
+  sl.nodes = qMax(1, s.value("slurm/nodes", 1).toInt());
+  sl.tasksPerNode = qMax(1, s.value("slurm/tasks_per_node", 4).toInt());
   sl.requestGpus = s.value("slurm/request_gpus", false).toBool();
-  sl.gpusPerNode = s.value("slurm/gpus_per_node", 1).toInt();
+  sl.gpusPerNode = qMax(1, s.value("slurm/gpus_per_node", 1).toInt());
   sl.spackRoot = s.value("slurm/spack_root", "/opt/spack").toString();
+  sl.jobName = s.value("slurm/job_name", "gridlock_debug").toString();
+  sl.account = s.value("slurm/account", "").toString();
+  sl.qos = s.value("slurm/qos", "(default)").toString();
+  sl.wallTime = s.value("slurm/wall_time", "01:00:00").toString();
+  sl.cpusPerTask = qMax(1, s.value("slurm/cpus_per_task", 1).toInt());
+  sl.memory = s.value("slurm/memory", "").toString();
+  sl.gpuType = s.value("slurm/gpu_type", "").toString();
+  sl.constraint = s.value("slurm/constraint", "").toString();
+  sl.mpiLauncher = s.value("slurm/mpi_launcher", "srun").toString();
+  sl.modules = s.value("slurm/modules", "").toString();
+  sl.outputLog = s.value("slurm/output_log", "gridlock_%j.log").toString();
+  sl.errorLog = s.value("slurm/error_log", "").toString();
+  sl.mailType = s.value("slurm/mail_type", "NONE").toString();
+  sl.mailUser = s.value("slurm/mail_user", "").toString();
+  sl.scriptPath = s.value("slurm/script_path", "").toString();
+  sl.sbatchPath = s.value("slurm/sbatch_path", "sbatch").toString();
+  sl.squeuePath = s.value("slurm/squeue_path", "squeue").toString();
+  sl.scontrolPath = s.value("slurm/scontrol_path", "scontrol").toString();
   return sl;
 }
 
-/** @brief Persists SLURM batch allocation and remote Spack root settings. */
+/** @brief Persists SLURM batch allocation, tool paths, and remote Spack root settings. */
 void ConfigManager::saveSlurmSettings(const SlurmSettings& sl) {
   QSettings s(kOrg, kApp);
   s.setValue("slurm/script_template", sl.scriptTemplate);
@@ -154,6 +172,24 @@ void ConfigManager::saveSlurmSettings(const SlurmSettings& sl) {
   s.setValue("slurm/request_gpus", sl.requestGpus);
   s.setValue("slurm/gpus_per_node", qMax(1, sl.gpusPerNode));
   s.setValue("slurm/spack_root", sl.spackRoot);
+  s.setValue("slurm/job_name", sl.jobName);
+  s.setValue("slurm/account", sl.account);
+  s.setValue("slurm/qos", sl.qos);
+  s.setValue("slurm/wall_time", sl.wallTime);
+  s.setValue("slurm/cpus_per_task", qMax(1, sl.cpusPerTask));
+  s.setValue("slurm/memory", sl.memory);
+  s.setValue("slurm/gpu_type", sl.gpuType);
+  s.setValue("slurm/constraint", sl.constraint);
+  s.setValue("slurm/mpi_launcher", sl.mpiLauncher);
+  s.setValue("slurm/modules", sl.modules);
+  s.setValue("slurm/output_log", sl.outputLog);
+  s.setValue("slurm/error_log", sl.errorLog);
+  s.setValue("slurm/mail_type", sl.mailType);
+  s.setValue("slurm/mail_user", sl.mailUser);
+  s.setValue("slurm/script_path", sl.scriptPath);
+  s.setValue("slurm/sbatch_path", sl.sbatchPath.trimmed().isEmpty() ? QStringLiteral("sbatch") : sl.sbatchPath.trimmed());
+  s.setValue("slurm/squeue_path", sl.squeuePath.trimmed().isEmpty() ? QStringLiteral("squeue") : sl.squeuePath.trimmed());
+  s.setValue("slurm/scontrol_path", sl.scontrolPath.trimmed().isEmpty() ? QStringLiteral("scontrol") : sl.scontrolPath.trimmed());
   s.sync();
 }
 

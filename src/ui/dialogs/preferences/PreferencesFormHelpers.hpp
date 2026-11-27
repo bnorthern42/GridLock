@@ -119,8 +119,12 @@ inline void addFormNote(QWidget* parent, QFormLayout* form, const QString& html)
 inline void setComboTextValue(QComboBox* combo, const QString& value) {
     if (!combo) return;
     const int idx = combo->findText(value, Qt::MatchFixedString);
-    if (idx >= 0) combo->setCurrentIndex(idx);
-    else combo->setEditText(value);
+    if (idx >= 0) {
+        combo->setCurrentIndex(idx);
+    } else {
+        combo->setCurrentIndex(-1);
+        combo->setEditText(value);
+    }
 }
 
 }  // namespace gridlock::ui::prefs_detail

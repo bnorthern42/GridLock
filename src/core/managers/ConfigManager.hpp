@@ -64,16 +64,34 @@ struct SshSettings {
 
 /**
  * @struct SlurmSettings
- * @brief SLURM batch job and remote Spack root configuration.
+ * @brief SLURM batch job, scheduler tool paths, and remote Spack root configuration.
  */
 struct SlurmSettings {
-  QString scriptTemplate = "";      ///< Default `sbatch` script body (`%%FILE%%` placeholder).
-  QString partition = "batch";      ///< SLURM partition or queue name.
-  int nodes = 1;                    ///< Number of compute nodes to allocate.
-  int tasksPerNode = 4;             ///< Number of MPI tasks per allocated node.
-  bool requestGpus = false;         ///< Whether to include `--gres=gpu` in the allocation.
-  int gpusPerNode = 1;              ///< Number of GPUs requested per node when `requestGpus` is true.
-  QString spackRoot = "/opt/spack"; ///< Spack installation prefix on the cluster.
+  QString scriptTemplate = "";             ///< Default `sbatch` script body (`{FILE}` / `%%FILE%%` placeholder).
+  QString partition = "batch";             ///< SLURM partition or queue name.
+  int nodes = 1;                           ///< Number of compute nodes to allocate.
+  int tasksPerNode = 4;                    ///< Number of MPI tasks per allocated node.
+  bool requestGpus = false;                ///< Whether to include `--gres=gpu` in the allocation.
+  int gpusPerNode = 1;                     ///< Number of GPUs requested per node when `requestGpus` is true.
+  QString spackRoot = "/opt/spack";        ///< Spack installation prefix on the cluster.
+  QString jobName = "gridlock_debug";      ///< SLURM job name (`--job-name` / `-J`).
+  QString account = "";                    ///< Optional billing/project account (`--account` / `-A`).
+  QString qos = "(default)";               ///< Optional Quality of Service tier (`--qos` / `-q`).
+  QString wallTime = "01:00:00";           ///< Job wall-clock limit (`--time` / `-t`).
+  int cpusPerTask = 1;                     ///< CPU cores per MPI task (`--cpus-per-task` / `-c`).
+  QString memory = "";                     ///< Optional per-node memory spec (`--mem` or `per-cpu:<val>`).
+  QString gpuType = "";                    ///< Optional GPU model token (`a100`, `h100`) for `--gres=gpu:<type>:<n>`.
+  QString constraint = "";                 ///< Optional node feature constraint (`--constraint` / `-C`).
+  QString mpiLauncher = "srun";            ///< MPI job launcher inside the batch script (`srun`, `mpirun`, `mpiexec`).
+  QString modules = "";                    ///< Space-separated environment modules for `module load`.
+  QString outputLog = "gridlock_%j.log";   ///< Standard output log pattern (`--output` / `-o`).
+  QString errorLog = "";                   ///< Optional standard error log pattern (`--error` / `-e`).
+  QString mailType = "NONE";               ///< Notification event filter (`--mail-type`).
+  QString mailUser = "";                   ///< Notification email recipient (`--mail-user`).
+  QString scriptPath = "";                 ///< Last loaded `.sbatch`/`.slurm` script file path.
+  QString sbatchPath = "sbatch";           ///< Path or command name for `sbatch`.
+  QString squeuePath = "squeue";           ///< Path or command name for `squeue`.
+  QString scontrolPath = "scontrol";       ///< Path or command name for `scontrol`.
 };
 
 /**

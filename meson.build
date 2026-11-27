@@ -60,7 +60,7 @@ src_files = [
   'src/ui/dialogs/preferences/PreferencesDialog.cpp', 'src/ui/dialogs/preferences/PreferencesDialogChrome.cpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.cpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.cpp', 'src/ui/dialogs/preferences/ShortcutItemDelegate.cpp',
   'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp', 'src/ui/dialogs/preferences/PluginSettingsPage.cpp',
   'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginHostBridgeUi.cpp', 'src/core/plugins/PluginInstaller.cpp', 'src/core/plugins/PluginManifest.cpp', 'src/core/plugins/PluginManager.cpp', 'src/core/plugins/PluginVerifier.cpp',
-  'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/managers/SpackManager.cpp',
+  'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/hpc/system/LocalSlurmBackend.cpp', 'src/core/managers/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp', 'src/core/managers/ShortcutManager.cpp',
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/DocsetManagerIndex.cpp', 'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp', 'src/ui/docks/VariablesDockWidget.cpp',
@@ -92,7 +92,7 @@ moc_headers = [
   'src/ui/dialogs/preferences/PreferencesDialog.hpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.hpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.hpp', 'src/ui/dialogs/preferences/KeybindingsSettingsPage.hpp',
   'src/ui/dialogs/preferences/DebuggerSettingsPage.hpp', 'src/ui/dialogs/preferences/HpcSettingsPages.hpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.hpp', 'src/ui/dialogs/preferences/PluginSettingsPage.hpp',
   'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginInstaller.hpp', 'src/core/plugins/PluginManager.hpp', 'src/core/hpc/HpcBackend.hpp',
-  'src/core/hpc/analysis/MockHpcBackend.hpp', 'src/core/managers/SpackManager.hpp',
+  'src/core/hpc/analysis/MockHpcBackend.hpp', 'src/core/hpc/system/LocalSlurmBackend.hpp', 'src/core/managers/SpackManager.hpp',
   'src/core/managers/ShortcutManager.hpp', 'src/core/managers/DocsetManager.hpp',
   'src/core/managers/ThemeManager.hpp', 'src/core/managers/SessionManager.hpp',
   'src/core/models/VariableTreeModel.hpp', 'src/ui/docks/VariablesDockWidget.hpp',
@@ -255,7 +255,7 @@ ui_test_src = [
   'src/ui/dialogs/preferences/PreferencesDialog.cpp', 'src/ui/dialogs/preferences/PreferencesDialogChrome.cpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.cpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.cpp', 'src/ui/dialogs/preferences/ShortcutItemDelegate.cpp',
   'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp', 'src/ui/dialogs/preferences/PluginSettingsPage.cpp',
   'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginHostBridgeUi.cpp', 'src/core/plugins/PluginInstaller.cpp', 'src/core/plugins/PluginManifest.cpp', 'src/core/plugins/PluginManager.cpp', 'src/core/plugins/PluginVerifier.cpp',
-  'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/managers/SpackManager.cpp',
+  'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/hpc/system/LocalSlurmBackend.cpp', 'src/core/managers/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp', 'src/core/managers/ShortcutManager.cpp',
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/DocsetManagerIndex.cpp', 'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp', 'src/ui/docks/VariablesDockWidget.cpp',
@@ -284,7 +284,7 @@ ui_test_moc_headers = [
   'src/ui/views/RegisterView.hpp', 'src/ui/dialogs/preferences/PreferencesDialog.hpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.hpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.hpp', 'src/ui/dialogs/preferences/KeybindingsSettingsPage.hpp',
   'src/ui/dialogs/preferences/DebuggerSettingsPage.hpp', 'src/ui/dialogs/preferences/HpcSettingsPages.hpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.hpp', 'src/ui/dialogs/preferences/PluginSettingsPage.hpp',
   'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginInstaller.hpp', 'src/core/plugins/PluginManager.hpp',
-  'src/core/hpc/HpcBackend.hpp', 'src/core/hpc/analysis/MockHpcBackend.hpp',
+  'src/core/hpc/HpcBackend.hpp', 'src/core/hpc/analysis/MockHpcBackend.hpp', 'src/core/hpc/system/LocalSlurmBackend.hpp',
   'src/core/managers/SpackManager.hpp', 'src/core/managers/ShortcutManager.hpp',
   'src/core/managers/DocsetManager.hpp', 'src/core/managers/ThemeManager.hpp',
   'src/core/managers/SessionManager.hpp', 'src/core/models/VariableTreeModel.hpp',
@@ -319,12 +319,15 @@ test('ui_tests', gridlock_ui_tests,
 
 config_test_src = [
   'tests/core/test_config.cpp',
+  'src/core/hpc/system/LocalSlurmBackend.cpp',
   'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp',
   'src/core/managers/SessionManager.cpp'
 ]
 
 config_test_moc_headers = [
   'tests/core/test_config.hpp',
+  'src/core/hpc/HpcBackend.hpp',
+  'src/core/hpc/system/LocalSlurmBackend.hpp',
   'src/core/managers/SessionManager.hpp'
 ]
 

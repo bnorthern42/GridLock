@@ -216,5 +216,8 @@ private slots:
 
     /** @brief Verifies Submit Slurm Job File menu action is hidden by default and dynamically toggled via HPC / Cluster settings opt-in checkbox. */
     void testSlurmFileMenuOptInToggle();
+
+    /** @brief Verifies SlurmBatchParser directive round-tripping, full 21-field HPC Integration QSettings persistence, binary {FILE} resolution, and end-to-end offline Slurm attach/scancel. */
+    void testSlurmParserPersistenceAndLocalBackendWorkflow();
 };
 

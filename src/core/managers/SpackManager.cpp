@@ -90,6 +90,8 @@ void SpackManager::reconnectBackend() {
             this, &SpackManager::onPackagesReady, Qt::UniqueConnection);
     connect(m_backend, &gridlock::core::HpcBackend::slurmJobSubmitted,
             this, &SpackManager::onJobSubmitted, Qt::UniqueConnection);
+    connect(m_backend, &gridlock::core::HpcBackend::commandFinished,
+            this, &SpackManager::onCommandFinished, Qt::UniqueConnection);
 }
 
 /**
@@ -145,6 +147,13 @@ void SpackManager::onJobSubmitted(const gridlock::core::HpcResult& result) {
         emit jobSubmitted(result.output);
     } else {
         appendMessage(result.errorOutput.trimmed(), /*isError=*/true);
+    }
+}
+
+void SpackManager::onCommandFinished(const QString& tag, const gridlock::core::HpcResult& result) {
+    const QString msg = result.success ? result.output.trimmed() : result.errorOutput.trimmed();
+    if (!msg.isEmpty()) {
+        appendMessage(QStringLiteral("[%1] %2").arg(tag, msg), !result.success);
     }
 }
 

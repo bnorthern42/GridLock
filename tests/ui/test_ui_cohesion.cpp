@@ -33,12 +33,14 @@
 #include <QToolBar>
 #include <QtTest/QtTest>
 
+#include "../../src/core/hpc/system/LocalSlurmBackend.hpp"
 #include "../../src/core/managers/ConfigManager.hpp"
+#include "../../src/core/managers/SpackManager.hpp"
 #include "../../src/core/managers/ThemeManager.hpp"
 #include "../../src/core/models/VariableTreeModel.hpp"
 #include "../../src/core/utils/ElfBinaryInspector.hpp"
 #include "../../src/ui/MainWindow.hpp"
-#include "../../src/ui/dialogs/preferences/PreferencesDialog.hpp"
+#include "../../src/ui/dialogs/preferences/HpcSettingsPages.hpp"
 #include "../../src/ui/dialogs/preferences/PreferencesDialog.hpp"
 #include "../../src/ui/docks/CallStackDockWidget.hpp"
 #include "../../src/ui/docks/VariablesDockWidget.hpp"
@@ -447,4 +449,228 @@ void TestMainWindowUI::testSlurmFileMenuOptInToggle() {
     slurmCheck->setChecked(false);
     okBtn->click(); QApplication::processEvents();
     QVERIFY2(!cfg.getHpcSettings().enableSlurmMenu && !slurmAct->isVisible(), "Unchecking opt-in checkbox and clicking OK must hide Submit Slurm Job...");
+}
+
+void TestMainWindowUI::testSlurmParserPersistenceAndLocalBackendWorkflow() {
+    (void)gridlock::core::ConfigManager::instance();
+    const QString prevCfgPath = QString::fromUtf8(qgetenv("GRIDLOCK_TEST_CONFIG_DIR"));
+    QTemporaryDir isolatedDir;
+    QVERIFY(isolatedDir.isValid());
+    struct ScopedIsolation {
+        QString prev;
+        ~ScopedIsolation() {
+            if (qApp) qApp->setProperty("gridlock_non_interactive_slurm", QVariant());
+            if (!prev.isEmpty()) {
+                QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, prev);
+                QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, prev);
+            }
+        }
+    } isoGuard{prevCfgPath};
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, isolatedDir.path());
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, isolatedDir.path());
+    qApp->setProperty("gridlock_non_interactive_slurm", true);
+
+    // 1. Verify SlurmBatchParser round-trips -n vs --ntasks-per-node, quoted --job-name, --error, --mem-per-cpu, --chdir, --exclusive, and "{FILE}".
+    {
+        gridlock::ui::HpcIntegrationSettingsPage page;
+        const QString scriptNtasks = QStringLiteral(
+            "#!/bin/bash\n"
+            "#SBATCH --job-name=\"my mpi job\"\n"
+            "#SBATCH --nodes=2\n"
+            "#SBATCH -n 8\n"
+            "#SBATCH --cpus-per-task=2\n"
+            "#SBATCH --mem-per-cpu=4G\n"
+            "#SBATCH --exclusive\n"
+            "#SBATCH --chdir=\"/scratch/my run\"\n"
+            "#SBATCH -o out_%j.log\n"
+            "#SBATCH -e err_%j.log\n"
+            "module load gcc/13 openmpi/5\n"
+            "srun \"{FILE}\"\n");
+        QVERIFY(page.parseSlurmBatchScript(scriptNtasks));
+        QCOMPARE(page.slurmFieldValue(QStringLiteral("job_name")), QStringLiteral("my mpi job"));
+        QCOMPARE(page.slurmFieldValue(QStringLiteral("nodes")), QStringLiteral("2"));
+        QCOMPARE(page.slurmFieldValue(QStringLiteral("ntasks_per_node")), QStringLiteral("4"));
+        QCOMPARE(page.slurmFieldValue(QStringLiteral("ntasks")), QStringLiteral("8"));
+        QCOMPARE(page.slurmFieldValue(QStringLiteral("mem_per_cpu")), QStringLiteral("4G"));
+        QVERIFY(page.slurmFieldValue(QStringLiteral("mem")).isEmpty());
+        QCOMPARE(page.slurmFieldValue(QStringLiteral("error")), QStringLiteral("err_%j.log"));
+        QCOMPARE(page.slurmFieldValue(QStringLiteral("chdir")), QStringLiteral("/scratch/my run"));
+        QCOMPARE(page.slurmFieldValue(QStringLiteral("exclusive")), QStringLiteral("true"));
+
+        const QString regen = page.generateSlurmBatchScript();
+        QVERIFY2(regen.contains(QStringLiteral("#SBATCH --job-name=\"my mpi job\"")), qPrintable(regen));
+        QVERIFY2(regen.contains(QStringLiteral("#SBATCH --nodes=2")) && regen.contains(QStringLiteral("#SBATCH --ntasks=8")) &&
+                 !regen.contains(QStringLiteral("--ntasks-per-node=8")), qPrintable(regen));
+        QVERIFY2(regen.contains(QStringLiteral("#SBATCH --mem-per-cpu=4G")) && !regen.contains(QStringLiteral("#SBATCH --mem=")), qPrintable(regen));
+        QVERIFY2(regen.contains(QStringLiteral("#SBATCH --error=err_%j.log")) &&
+                 regen.contains(QStringLiteral("#SBATCH --chdir=\"/scratch/my run\"")) &&
+                 regen.contains(QStringLiteral("#SBATCH --exclusive")) &&
+                 regen.contains(QStringLiteral("srun \"{FILE}\"")), qPrintable(regen));
+
+        gridlock::ui::HpcIntegrationSettingsPage reparsed;
+        QVERIFY(reparsed.parseSlurmBatchScript(regen));
+        QCOMPARE(reparsed.slurmFieldValue(QStringLiteral("job_name")), QStringLiteral("my mpi job"));
+        QCOMPARE(reparsed.slurmFieldValue(QStringLiteral("ntasks")), QStringLiteral("8"));
+        QCOMPARE(reparsed.slurmFieldValue(QStringLiteral("mem_per_cpu")), QStringLiteral("4G"));
+        QCOMPARE(reparsed.slurmFieldValue(QStringLiteral("error")), QStringLiteral("err_%j.log"));
+
+        const QString subbed = gridlock::ui::HpcIntegrationSettingsPage::substituteTargetBinary(
+            regen, QStringLiteral("/work/space dir/build/solver"), QStringLiteral("--steps 5"));
+        QVERIFY2(subbed.contains(QStringLiteral("srun \"/work/space dir/build/solver\" --steps 5")), qPrintable(subbed));
+    }
+
+    // 2. Verify all HPC Integration fields persist across PreferencesDialog Apply/OK without manual Sync click.
+    const QList<QPair<QString, QString>> fieldPairs = {
+        {QStringLiteral("ssh_host"), QStringLiteral("login.hpcc.ttu.edu")},
+        {QStringLiteral("ssh_user"), QStringLiteral("raider42")},
+        {QStringLiteral("ssh_key_path"), QStringLiteral("~/.ssh/id_ed25519_ttu")},
+        {QStringLiteral("script_path"), QStringLiteral("/home/raider42/run.sbatch")},
+        {QStringLiteral("job_name"), QStringLiteral("cfd_debug_run")},
+        {QStringLiteral("account"), QStringLiteral("engr_alloc")},
+        {QStringLiteral("partition"), QStringLiteral("nocona")},
+        {QStringLiteral("qos"), QStringLiteral("debug")},
+        {QStringLiteral("time"), QStringLiteral("00:30:00")},
+        {QStringLiteral("nodes"), QStringLiteral("2")},
+        {QStringLiteral("ntasks_per_node"), QStringLiteral("2")},
+        {QStringLiteral("cpus_per_task"), QStringLiteral("4")},
+        {QStringLiteral("mem"), QStringLiteral("32G")},
+        {QStringLiteral("request_gpus"), QStringLiteral("true")},
+        {QStringLiteral("gpu_type"), QStringLiteral("a100")},
+        {QStringLiteral("gpus_per_node"), QStringLiteral("2")},
+        {QStringLiteral("constraint"), QStringLiteral("rome")},
+        {QStringLiteral("mpi_launcher"), QStringLiteral("srun --mpi=pmix")},
+        {QStringLiteral("modules"), QStringLiteral("gcc/13.2 openmpi/5.0")},
+        {QStringLiteral("output"), QStringLiteral("cfd_%j.out")},
+        {QStringLiteral("error"), QStringLiteral("cfd_%j.err")},
+        {QStringLiteral("mail_type"), QStringLiteral("FAIL")},
+        {QStringLiteral("mail_user"), QStringLiteral("raider42@ttu.edu")},
+        {QStringLiteral("sbatch_path"), QStringLiteral("/opt/slurm/bin/sbatch")},
+        {QStringLiteral("squeue_path"), QStringLiteral("/opt/slurm/bin/squeue")},
+        {QStringLiteral("scontrol_path"), QStringLiteral("/opt/slurm/bin/scontrol")},
+        {QStringLiteral("spack_root"), QStringLiteral("/opt/ttu_spack")},
+    };
+    {
+        gridlock::ui::PreferencesDialog prefs1;
+        auto* hpcInt1 = prefs1.findChild<gridlock::ui::HpcIntegrationSettingsPage*>();
+        QVERIFY(hpcInt1 != nullptr);
+        for (const auto& [k, v] : fieldPairs) hpcInt1->setSlurmFieldValue(k, v);
+        auto* btnBox = prefs1.findChild<QDialogButtonBox*>();
+        QVERIFY(btnBox && btnBox->button(QDialogButtonBox::Ok));
+        btnBox->button(QDialogButtonBox::Ok)->click();
+        QApplication::processEvents();
+    }
+    {
+        gridlock::ui::PreferencesDialog prefs2;
+        auto* hpcInt2 = prefs2.findChild<gridlock::ui::HpcIntegrationSettingsPage*>();
+        QVERIFY(hpcInt2 != nullptr);
+        for (const auto& [k, v] : fieldPairs) {
+            if (k == QStringLiteral("request_gpus") || k == QStringLiteral("gpu_type") || k == QStringLiteral("gpus_per_node")) continue;
+            QCOMPARE(hpcInt2->slurmFieldValue(k), v);
+        }
+        QCOMPARE(hpcInt2->slurmFieldValue(QStringLiteral("gres_gpu")), QStringLiteral("a100:2"));
+    }
+
+    // 3. End-to-end MainWindow Slurm submission: never substitutes .cpp m_currentFile, maps node01:2345..node02:2348, attaches, and scancels on stop.
+    const QString shimDir = isolatedDir.filePath(QStringLiteral("slurm_shims"));
+    const QString projDir = isolatedDir.filePath(QStringLiteral("mpi project"));
+    QVERIFY(QDir().mkpath(shimDir) && QDir().mkpath(projDir));
+    auto writeExec = [](const QString& path, const QByteArray& body) {
+        QFile f(path);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+        f.write(body);
+        f.close();
+        return QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner |
+                                               QFileDevice::ReadGroup | QFileDevice::ExeGroup);
+    };
+
+    const QString cppFile = QDir(projDir).filePath(QStringLiteral("mini_mpi.cpp"));
+    const QString binFile = QDir(projDir).filePath(QStringLiteral("mini_mpi"));
+    {
+        QFile sf(cppFile);
+        QVERIFY(sf.open(QIODevice::WriteOnly | QIODevice::Text));
+        sf.write("int main() { return 0; }\n");
+        sf.close();
+    }
+    QProcess gxx;
+    gxx.start(QStringLiteral("g++"), {QStringLiteral("-g"), QStringLiteral("-O0"), cppFile, QStringLiteral("-o"), binFile});
+    QVERIFY(gxx.waitForFinished(15000) && gxx.exitCode() == 0 && QFileInfo(binFile).isExecutable());
+
+    const QString capturedSbatch = QDir(shimDir).filePath(QStringLiteral("captured.sbatch"));
+    const QString pollFile = QDir(shimDir).filePath(QStringLiteral("poll.cnt"));
+    const QString scancelLog = QDir(shimDir).filePath(QStringLiteral("scancel.log"));
+    const QString gdbCmdLog = QDir(shimDir).filePath(QStringLiteral("gdb_cmds.log"));
+    const QString fakeGdb = QDir(shimDir).filePath(QStringLiteral("fake_gdb"));
+    QVERIFY(writeExec(QDir(shimDir).filePath(QStringLiteral("sbatch")), QStringLiteral(
+        "#!/bin/sh\ncp \"$2\" \"%1\"\necho \"77001\"\n").arg(capturedSbatch).toUtf8()));
+    QVERIFY(writeExec(QDir(shimDir).filePath(QStringLiteral("squeue")), QStringLiteral(
+        "#!/bin/sh\n"
+        "for a in \"$@\"; do if [ \"$a\" = \"%N\" ]; then echo \"node[01-02]\"; exit 0; fi; done\n"
+        "c=0; [ -f \"%1\" ] && c=$(cat \"%1\"); c=$((c+1)); echo \"$c\" > \"%1\"\n"
+        "if [ \"$c\" -le 1 ]; then echo \"PENDING\"; else echo \"RUNNING\"; fi\n").arg(pollFile).toUtf8()));
+    QVERIFY(writeExec(QDir(shimDir).filePath(QStringLiteral("scontrol")),
+        "#!/bin/sh\nprintf 'node01\\nnode02\\n'\n"));
+    QVERIFY(writeExec(QDir(shimDir).filePath(QStringLiteral("scancel")), QStringLiteral(
+        "#!/bin/sh\necho \"$1\" >> \"%1\"\n").arg(scancelLog).toUtf8()));
+    QVERIFY(writeExec(fakeGdb, QStringLiteral(
+        "#!/bin/sh\n"
+        "echo '=thread-group-added,id=\"i1\"'\n"
+        "while IFS= read -r ln; do\n"
+        "  echo \"$ln\" >> \"%1\"\n"
+        "  case \"$ln\" in *-gdb-exit*) exit 0 ;; *-target-select*) echo '=thread-group-started,id=\"i1\",pid=\"42\"'; echo '*stopped,reason=\"signal-received\",signal-name=\"SIGTRAP\",frame={addr=\"0x00401120\",func=\"main\",args=[],file=\"%2\",fullname=\"%2\",line=\"1\"},thread-id=\"1\",stopped-threads=\"all\"'; echo '^connected' ;; *) echo '^done' ;; esac\n"
+        "done\n").arg(gdbCmdLog, cppFile).toUtf8()));
+
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    cfg.saveSshSettings({});
+    auto dbg = cfg.getDebuggerSettings(); dbg.gdbPath = fakeGdb; cfg.saveDebuggerSettings(dbg);
+    auto ps = cfg.loadProjectSettings(); ps.customGdbPath = fakeGdb.toStdString(); cfg.saveProjectSettings(ps);
+    auto sl = cfg.getSlurmSettings();
+    sl.sbatchPath = QDir(shimDir).filePath(QStringLiteral("sbatch"));
+    sl.squeuePath = QDir(shimDir).filePath(QStringLiteral("squeue"));
+    sl.scontrolPath = QDir(shimDir).filePath(QStringLiteral("scontrol"));
+    sl.nodes = 2; sl.tasksPerNode = 2;
+    sl.scriptTemplate = QStringLiteral("#!/bin/bash\n#SBATCH --nodes=2\n#SBATCH --ntasks-per-node=2\nsrun \"{FILE}\"\n");
+    cfg.saveSlurmSettings(sl);
+
+    gridlock::ui::MainWindow mw;
+    mw.resize(1280, 800);
+    mw.show();
+    QApplication::processEvents();
+    auto* slurmBackend = dynamic_cast<gridlock::core::LocalSlurmBackend*>(mw.hpcBackend());
+    QVERIFY(slurmBackend != nullptr);
+    slurmBackend->setPollIntervalMs(20);
+
+    // Open the .cpp source file so m_currentFile is a .cpp file, while loading the compiled binary target.
+    mw.loadBinaryTarget(binFile);
+    mw.loadSourceFile(cppFile);
+    QVERIFY(mw.onSubmitSlurmJob());
+
+    QTRY_VERIFY_WITH_TIMEOUT(mw.isDebugSessionActive() && mw.serverRackView()->count() == 4, 6000);
+    const QStringList expectedEndpoints{
+        QStringLiteral("node01:2345"), QStringLiteral("node01:2346"),
+        QStringLiteral("node02:2347"), QStringLiteral("node02:2348")};
+    QCOMPARE(slurmBackend->resolvedComputeEndpoints(), expectedEndpoints);
+
+    QFile cap(capturedSbatch);
+    QVERIFY(cap.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString capBody = QString::fromUtf8(cap.readAll());
+    QVERIFY2(capBody.contains(QStringLiteral("\"%1\"").arg(binFile)) && !capBody.contains(cppFile),
+             "Staged sbatch script must launch the compiled binary and never substitute the .cpp source path");
+
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
+        QFile gf(gdbCmdLog);
+        if (!gf.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
+        const QString g = QString::fromUtf8(gf.readAll());
+        return g.contains(QStringLiteral("extended-remote node01:2345")) &&
+               g.contains(QStringLiteral("extended-remote node01:2346")) &&
+               g.contains(QStringLiteral("extended-remote node02:2347")) &&
+               g.contains(QStringLiteral("extended-remote node02:2348"));
+    })(), 4000);
+
+    mw.stopTargetWorkflow();
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
+        QFile sf(scancelLog);
+        return sf.open(QIODevice::ReadOnly | QIODevice::Text) &&
+               QString::fromUtf8(sf.readAll()).trimmed().contains(QStringLiteral("77001"));
+    })(), 3000);
 }

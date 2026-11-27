@@ -8,6 +8,7 @@
 
 #include "MainWindow.hpp"
 
+#include "../core/hpc/system/LocalSlurmBackend.hpp"
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/ThemeManager.hpp"
 #include "EditorTabManager.hpp"
@@ -642,6 +643,11 @@ void MainWindow::updateDebugToolbarState() {
   syncAct(m_pauseAction, QStringLiteral("Pause Focused Rank — interrupt execution on the active MPI rank"), QStringLiteral("Pause Focused Rank"));
   syncAct(m_stopAction, QStringLiteral("Stop Session (Shift+F5) — terminate active debugging session"), QStringLiteral("Stop Session (Shift+F5)"));
   if (m_stopAction && m_remoteAttachSession) m_stopAction->setEnabled(true);
+  if (m_stopAction && m_hpcBackend) {
+    if (auto* slurm = dynamic_cast<gridlock::core::LocalSlurmBackend*>(m_hpcBackend); slurm && slurm->isJobActive()) {
+      m_stopAction->setEnabled(true);
+    }
+  }
   auto syncBtn = [&](QWidget* w, const QString& onTip, const QString& name) { if (w) { w->setEnabled(active); w->setToolTip(active ? onTip : (name + idleWhy)); } };
   syncBtn(findChild<QPushButton*>(QStringLiteral("disasmStepiBtn")), QStringLiteral("Step Instruction (stepi) — execute one machine instruction"), QStringLiteral("Step Instruction (stepi)"));
   syncBtn(findChild<QPushButton*>(QStringLiteral("disasmNextiBtn")), QStringLiteral("Next Instruction (nexti) (Ctrl+Shift+F10)"), QStringLiteral("Next Instruction (nexti) (Ctrl+Shift+F10)"));

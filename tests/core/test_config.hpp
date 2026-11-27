@@ -63,4 +63,9 @@ private slots:
      * @brief Tests MRU session queue capacity limiting, ordering, and re-insertion.
      */
     void testMruLogic();
+
+    /**
+     * @brief Tests LocalSlurmBackend offline sbatch submission, error handling, squeue polling, scontrol node expansion, and scancel cleanup.
+     */
+    void testLocalSlurmBackendPipeline();
 };

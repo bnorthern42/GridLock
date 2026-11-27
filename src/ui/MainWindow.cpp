@@ -35,7 +35,7 @@
 #include <QWindow>
 
 #include "../core/Version.hpp"
-#include "../core/hpc/analysis/MockHpcBackend.hpp"
+#include "../core/hpc/system/LocalSlurmBackend.hpp"
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/ShortcutManager.hpp"
 #include "../core/managers/SpackManager.hpp"
@@ -52,6 +52,7 @@
 #include "views/ServerRackView.hpp"
 #include "views/SourceCodeView.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
+#include "widgets/HpcConsoleWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/MpiNetworkLogWidget.hpp"
 
@@ -116,12 +117,68 @@ SourceCodeView* MainWindow::getSourceCodeView() const {
  * @param parent Optional parent widget context.
  */
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    m_hpcBackend = new gridlock::core::MockHpcBackend(this);
+    auto* slurmBackend = new gridlock::core::LocalSlurmBackend(this);
+    m_hpcBackend = slurmBackend;
     setupUi();
     setupMenu();
     setupDocks();
     setupCallStackDock();
     setupStatusBar();
+
+    connect(slurmBackend, &gridlock::core::LocalSlurmBackend::statusMessage, this,
+            [this](const QString& msg, bool isErr) {
+                if (m_isShuttingDown || m_isClosing) return;
+                if (m_spackManager) m_spackManager->appendMessage(msg, isErr);
+                appendProgramOutput(-1, QStringLiteral("[Slurm] %1").arg(msg), isErr);
+                flushProgramOutputBatch();
+            });
+    connect(slurmBackend, &gridlock::core::LocalSlurmBackend::jobStateChanged, this,
+            [this](int jobId, const QString& state) {
+                if (m_isShuttingDown || m_isClosing) return;
+                updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("SLURM JOB %1: %2").arg(jobId).arg(state));
+                updateDebugToolbarState();
+            });
+    connect(slurmBackend, &gridlock::core::LocalSlurmBackend::jobFailed, this,
+            [this](int jobId, const QString&) {
+                if (m_isShuttingDown || m_isClosing) return;
+                updateStatusTelemetry(m_currentSeekOrPc,
+                                      jobId > 0 ? QStringLiteral("SLURM FAILED (%1)").arg(jobId)
+                                                : QStringLiteral("SLURM ERROR"));
+                updateDebugToolbarState();
+            });
+    connect(slurmBackend, &gridlock::core::LocalSlurmBackend::attachTargetsReady, this,
+            [this, slurmBackend](int jobId, const QList<RemoteTargetSpec>& targets, const QStringList& computeEndpoints) {
+                if (m_isShuttingDown || m_isClosing) return;
+                m_attachingSlurmJob = true;
+                const bool attached = attachToRemoteTargets(targets);
+                m_attachingSlurmJob = false;
+                if (!attached) {
+                    const QString err = QStringLiteral("Failed to attach GDB to Slurm job %1 endpoints (%2); cancelling allocation.")
+                                            .arg(jobId)
+                                            .arg(computeEndpoints.join(QStringLiteral(", ")));
+                    if (m_spackManager) m_spackManager->appendMessage(err, true);
+                    appendProgramOutput(-1, QStringLiteral("[Slurm] %1").arg(err), true);
+                    flushProgramOutputBatch();
+                    slurmBackend->cancelSlurmJob(jobId);
+                    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("SLURM ATTACH FAILED"));
+                    updateDebugToolbarState();
+                    return;
+                }
+                const int rankCount = targets.size();
+                for (int r = 0; r < rankCount && r < computeEndpoints.size(); ++r) {
+                    if (m_mpiDiagnosticsWidget) {
+                        m_mpiDiagnosticsWidget->updateLiveRankRow(
+                            r, 0, QStringLiteral("PAUSED"), QStringLiteral("slurm"),
+                            computeEndpoints[r], QStringLiteral("0x00000000"), rankCount);
+                    }
+                }
+                updateStatusTelemetry(m_currentSeekOrPc,
+                                      QStringLiteral("SLURM JOB %1 (%2 RANK%3)")
+                                          .arg(jobId)
+                                          .arg(rankCount)
+                                          .arg(rankCount == 1 ? QString() : QStringLiteral("S")));
+                updateDebugToolbarState();
+            });
 
     // Keep active file tracking synchronized whenever F12 Go-to-Definition switches editor tabs.
     if (m_editorTabManager) {
@@ -411,11 +468,7 @@ void MainWindow::setupMenu() {
     m_submitSlurmJobAction = fileMenu->addAction(QStringLiteral("Submit Slurm Job..."));
     m_submitSlurmJobAction->setObjectName(QStringLiteral("actionSubmitSlurmJob"));
     m_submitSlurmJobAction->setVisible(gridlock::core::ConfigManager::instance().getHpcSettings().enableSlurmMenu);
-    connect(m_submitSlurmJobAction, &QAction::triggered, this, [this]() {
-        QString script = gridlock::core::ConfigManager::instance().getSlurmSettings().scriptTemplate; script.replace("{FILE}", m_currentFile);
-        if (m_spackManager) { m_spackManager->appendMessage("Submitting SLURM batch job..."); m_bottomTabs->setCurrentWidget(m_spackManager); }
-        m_hpcBackend->submitSlurmJob(script);
-    });
+    connect(m_submitSlurmJobAction, &QAction::triggered, this, [this]() { onSubmitSlurmJob(); });
     fileMenu->addSeparator();
     fileMenu->addAction("Exit", this, &MainWindow::close);
 

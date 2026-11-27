@@ -292,6 +292,10 @@ public:
     bool attachToRunningProcesses(const QList<qint64>& explicitPids = {});
     /** @brief Connects `GdbRankCoordinator` to remote `gdbserver` / `qemu-user -g` endpoints. */
     bool attachToRemoteTargets(const QList<RemoteTargetSpec>& explicitTargets);
+    /** @brief Resolves the compiled target binary, submits a Slurm debug job via `LocalSlurmBackend`, and attaches on RUNNING. */
+    bool onSubmitSlurmJob(const QString& explicitBinaryPath = QString());
+    /** @brief Returns the active HPC/Slurm backend owned by this window. */
+    gridlock::core::HpcBackend* hpcBackend() const { return m_hpcBackend; }
     /** @brief Returns the persisted in-memory Remote Target dialog fields for this window session. */
     const RemoteTargetDialogState& remoteTargetDialogState() const { return m_remoteDialogState; }
     /** @brief Stores the latest Remote Target dialog fields in memory across dialog reopens. */
@@ -437,7 +441,7 @@ private:
     QString m_currentSeekOrPc = QStringLiteral("0x00000000"), m_currentTargetState = QStringLiteral("IDLE"), m_preferredMonitorHint;
     QVector<QString> m_seekHistory; int m_seekHistoryIndex = -1;
     bool m_isNavigatingHistory = false, m_showingDecompilerFallback = false, m_forceDecompilerFallback = false;
-    bool m_debugSessionActive = false, m_remoteAttachSession = false, m_suppressMemViewBroadcast = false, m_suppressExecutionTabSwitch = false, m_bottomConsoleMaximized = false;
+    bool m_debugSessionActive = false, m_remoteAttachSession = false, m_attachingSlurmJob = false, m_suppressMemViewBroadcast = false, m_suppressExecutionTabSwitch = false, m_bottomConsoleMaximized = false;
     QString m_workspacePerspective = QStringLiteral("Source");
     QPushButton* m_perspSourceBtn = nullptr; QPushButton* m_perspDebugBtn = nullptr;
     QPushButton* m_perspBinaryBtn = nullptr; QPushButton* m_perspMpiBtn = nullptr;

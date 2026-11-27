@@ -11,12 +11,15 @@
 
 #include "../core/hpc/dap/DapCoordinator.hpp"
 #include "../core/hpc/gdb/GdbRankCoordinator.hpp"
+#include "../core/hpc/system/LocalSlurmBackend.hpp"
 #include "../core/managers/ConfigManager.hpp"
+#include "../core/managers/SpackManager.hpp"
 #include "../core/plugins/PluginManager.hpp"
 #include "../core/utils/ClangdLspClient.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
 #include "dialogs/debugger/AttachProcessDialog.hpp"
+#include "dialogs/preferences/HpcSettingsPages.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "utils/FileDialogHelper.hpp"
 #include "views/DisassemblyView.hpp"
@@ -24,6 +27,7 @@
 #include "views/ServerRackView.hpp"
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
+#include "widgets/HpcConsoleWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 
@@ -590,6 +594,83 @@ bool MainWindow::attachToRemoteTargets(const QList<RemoteTargetSpec>& explicitTa
     updateDebugToolbarState(); syncRankCountChrome(rankCount); syncExecutionScopeUi();
     updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("REMOTE (%1)").arg(explicitTargets.first().endpoint));
     refreshStatusBarMemoryTelemetry(); return true;
+}
+
+bool MainWindow::onSubmitSlurmJob(const QString& explicitBinaryPath) {
+    if (m_debugSessionActive || m_remoteAttachSession) stopTargetWorkflow();
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    const auto isSourceOrConfigFile = [](const QString& path) {
+        const QString ext = QFileInfo(path).suffix().toLower();
+        return isCompilableCxxSource(ext) || isNonCodeDataExtension(ext) ||
+               ext == QStringLiteral("h") || ext == QStringLiteral("hpp") ||
+               ext == QStringLiteral("hh") || ext == QStringLiteral("hxx") ||
+               ext == QStringLiteral("sbatch") || ext == QStringLiteral("slurm") ||
+               ext == QStringLiteral("sh") || ext == QStringLiteral("toml");
+    };
+    const auto isUsableBinary = [&](const QString& path) {
+        if (path.trimmed().isEmpty() || isSourceOrConfigFile(path)) return false;
+        const QFileInfo fi(path);
+        return fi.exists() && fi.isFile() && fi.isExecutable();
+    };
+
+    QString binPath = explicitBinaryPath.trimmed();
+    if (binPath.isEmpty()) {
+        const QString srcPath = activeTargetSourcePath();
+        if (!srcPath.isEmpty() && isCompilableCxxSource(QFileInfo(srcPath).suffix().toLower())) {
+            if (!ensureTargetBinaryCompiled()) return false;
+        }
+        binPath = activeTargetBinaryPath();
+        if (!isUsableBinary(binPath) && isUsableBinary(m_loadedBinaryPath)) binPath = m_loadedBinaryPath;
+        if (!isUsableBinary(binPath)) {
+            const QString projBin = resolveWorkspacePath(QString::fromStdString(cfg.loadProjectSettings().targetBinary));
+            if (isUsableBinary(projBin)) binPath = projBin;
+        }
+        if (!isUsableBinary(binPath) && (!qApp || !qApp->property("gridlock_non_interactive_slurm").toBool())) {
+            binPath = QFileDialog::getOpenFileName(
+                this, tr("Select Compiled Target Executable for Slurm Job"),
+                m_activeWorkspaceDir.isEmpty() ? QDir::currentPath() : m_activeWorkspaceDir,
+                tr("Executables (*);;All Files (*)"), nullptr, QFileDialog::DontUseNativeDialog);
+        }
+    } else {
+        binPath = QFileInfo(binPath).absoluteFilePath();
+    }
+
+    selectBottomToolGroup(QStringLiteral("MPI"));
+    if (m_spackManager && m_bottomTabs) {
+        m_bottomTabs->setCurrentWidget(m_spackManager);
+        if (auto* hpcCon = dynamic_cast<HpcConsoleWidget*>(m_spackManager)) hpcCon->setViewMode(QStringLiteral("Raw"));
+    }
+
+    if (!isUsableBinary(binPath)) {
+        const QString err = QStringLiteral("No compiled target executable is selected for Slurm submission.");
+        if (m_spackManager) m_spackManager->appendMessage(err, true);
+        appendProgramOutput(-1, QStringLiteral("[Slurm] %1").arg(err), true);
+        flushProgramOutputBatch();
+        updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("SLURM ABORTED"));
+        return false;
+    }
+
+    const QFileInfo binInfo(binPath);
+    const QString absBin = binInfo.absoluteFilePath();
+    const auto ps = cfg.loadProjectSettings();
+    const QString targetArgs = cfg.programArgs(absBin).trimmed();
+    QString workDir = QString::fromStdString(ps.workingDirectory).trimmed();
+    if (workDir.isEmpty()) workDir = m_activeWorkspaceDir.trimmed();
+    if (workDir.isEmpty()) workDir = binInfo.absolutePath();
+
+    const auto slurmCfg = cfg.getSlurmSettings();
+    if (auto* slurmBackend = dynamic_cast<gridlock::core::LocalSlurmBackend*>(m_hpcBackend)) {
+        slurmBackend->submitDebugJob(slurmCfg.scriptTemplate, absBin, targetArgs, workDir);
+        updateDebugToolbarState();
+        return true;
+    }
+    if (m_hpcBackend) {
+        const QString rendered = HpcIntegrationSettingsPage::substituteTargetBinary(
+            slurmCfg.scriptTemplate, absBin, targetArgs);
+        m_hpcBackend->submitSlurmJob(rendered);
+        return true;
+    }
+    return false;
 }
 
 }  // namespace gridlock::ui

@@ -63,6 +63,9 @@ private slots:
     /** @brief Handles SLURM `sbatch` completion and logs output or error text. */
     void onJobSubmitted(const gridlock::core::HpcResult& result);
 
+    /** @brief Handles generic HPC command completion (such as `scancel`) and logs output. */
+    void onCommandFinished(const QString& tag, const gridlock::core::HpcResult& result);
+
     /** @brief Re-filters the cached package lines when the search input text changes. */
     void onFilterChanged(const QString& text);
 

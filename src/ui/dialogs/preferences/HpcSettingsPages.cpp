@@ -37,7 +37,7 @@ HpcSettingsPage::HpcSettingsPage(QWidget* parent)
     // Hostfile browse input layout with non-clipped 92px minimum Browse button width.
     auto* hostsRow = new QHBoxLayout();
     m_hostsFileEdit = new QLineEdit(this);
-    m_hostsFileEdit->setPlaceholderText(tr("(not set — use default hosts)"));
+    m_hostsFileEdit->setPlaceholderText(tr("(not set - use default hosts)"));
     m_hostsFileEdit->setToolTip(
         tr("Path to an MPI hostfile. When set, --hostfile <path> is passed to the\n"
            "MPI launcher. Leave empty to let the launcher choose nodes automatically."));
@@ -238,16 +238,21 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
 
     m_memCombo = new QComboBox(this);
     m_memCombo->setEditable(true);
-    m_memCombo->addItems({QStringLiteral("4G"), QStringLiteral("8G"), QStringLiteral("16G"), QStringLiteral("32G"),
+    m_memCombo->setMinimumWidth(120);
+    m_memCombo->addItems({QString(), QStringLiteral("4G"), QStringLiteral("8G"), QStringLiteral("16G"), QStringLiteral("32G"),
                           QStringLiteral("64G"), QStringLiteral("128G"), QStringLiteral("256G"), QStringLiteral("512G"),
                           QStringLiteral("0 (All Node Memory)")});
-    m_memCombo->setCurrentText(QStringLiteral("16G"));
-    m_memCombo->setToolTip(tr("Memory allocated per node (--mem)."));
+    m_memCombo->setCurrentText(QString());
+    if (m_memCombo->lineEdit()) {
+        m_memCombo->lineEdit()->setPlaceholderText(tr("(optional, e.g. 16G or per-cpu:4G)"));
+    }
+    m_memCombo->setToolTip(tr("Optional memory limit (--mem, or per-cpu:<size> for --mem-per-cpu). Leave blank for partition default."));
     form->addRow(tr("Memory:"), m_memCombo);
 
     auto* gpuRow = new QHBoxLayout(); gpuRow->setSpacing(8);
     m_gpuCheck = new QCheckBox(tr("Request GPUs"), this);
     m_gpuTypeEdit = new QLineEdit(this);
+    m_gpuTypeEdit->setMinimumWidth(120);
     m_gpuTypeEdit->setPlaceholderText(tr("GPU model (e.g. a100, v100)"));
     m_gpuTypeEdit->setToolTip(tr("Optional GPU accelerator type for --gres=gpu:<type>:<count>."));
     m_gpuTypeEdit->setEnabled(false);
@@ -277,8 +282,14 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
 
     m_outputLogEdit = new QLineEdit(this);
     m_outputLogEdit->setText(QStringLiteral("gridlock_%j.log"));
-    m_outputLogEdit->setToolTip(tr("SLURM stdout/stderr log file pattern (--output / -o)."));
+    m_outputLogEdit->setToolTip(tr("SLURM stdout log file pattern (--output / -o)."));
     form->addRow(tr("Output Log:"), m_outputLogEdit);
+
+    m_errorLogEdit = new QLineEdit(this);
+    m_errorLogEdit->setMinimumWidth(120);
+    m_errorLogEdit->setPlaceholderText(tr("(optional --error / -e pattern, e.g. gridlock_%j.err)"));
+    m_errorLogEdit->setToolTip(tr("Optional SLURM stderr log file pattern (--error / -e)."));
+    form->addRow(tr("Error Log:"), m_errorLogEdit);
 
     m_mailTypeCombo = new QComboBox(this);
     m_mailTypeCombo->setEditable(true);
@@ -290,6 +301,24 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
     m_mailUserEdit->setPlaceholderText(tr("user@university.edu"));
     m_mailUserEdit->setToolTip(tr("Email address for SLURM job notifications (--mail-user)."));
     form->addRow(tr("Mail User:"), m_mailUserEdit);
+
+    m_sbatchPathEdit = new QLineEdit(this);
+    m_sbatchPathEdit->setMinimumWidth(120);
+    m_sbatchPathEdit->setPlaceholderText(tr("sbatch"));
+    m_sbatchPathEdit->setToolTip(tr("Path or command name for the Slurm sbatch executable."));
+    form->addRow(tr("sbatch Path:"), m_sbatchPathEdit);
+
+    m_squeuePathEdit = new QLineEdit(this);
+    m_squeuePathEdit->setMinimumWidth(120);
+    m_squeuePathEdit->setPlaceholderText(tr("squeue"));
+    m_squeuePathEdit->setToolTip(tr("Path or command name for the Slurm squeue executable."));
+    form->addRow(tr("squeue Path:"), m_squeuePathEdit);
+
+    m_scontrolPathEdit = new QLineEdit(this);
+    m_scontrolPathEdit->setMinimumWidth(120);
+    m_scontrolPathEdit->setPlaceholderText(tr("scontrol"));
+    m_scontrolPathEdit->setToolTip(tr("Path or command name for the Slurm scontrol executable."));
+    form->addRow(tr("scontrol Path:"), m_scontrolPathEdit);
 
     auto* tplLabel = new QLabel(
         tr("Script Template (Use <tt>{FILE}</tt> as a placeholder for the target binary):"), this);
@@ -316,42 +345,190 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
            "running any spack commands."));
     form->addRow(tr("Spack Install Path:"), m_spackRootEdit);
 
+    disconnect(syncPreviewBtn, &QPushButton::clicked, nullptr, nullptr);
+    connect(syncPreviewBtn, &QPushButton::clicked, this, [this]() {
+        m_templateManuallyEdited = false;
+        m_updatingWidgets = true;
+        m_templateEdit->setPlainText(generateSlurmBatchScript());
+        m_updatingWidgets = false;
+    });
+
+    auto bindAutoSyncLine = [this](QLineEdit* w) {
+        connect(w, &QLineEdit::textEdited, this, [this]() { syncTemplateFromFieldsIfAuto(); });
+    };
+    auto bindAutoSyncCombo = [this](QComboBox* c) {
+        connect(c, &QComboBox::currentTextChanged, this, [this, c](const QString&) {
+            if (m_updatingWidgets) return;
+            if (c == m_memCombo) m_parsedMemPerCpu.clear();
+            syncTemplateFromFieldsIfAuto();
+        });
+    };
+    for (QLineEdit* le : {m_jobNameEdit, m_accountEdit, m_gpuTypeEdit, m_constraintEdit,
+                          m_modulesEdit, m_outputLogEdit, m_errorLogEdit, m_mailUserEdit}) {
+        bindAutoSyncLine(le);
+    }
+    for (QComboBox* cb : {m_partitionCombo, m_qosCombo, m_timeCombo, m_memCombo, m_mpiLauncherCombo, m_mailTypeCombo}) {
+        bindAutoSyncCombo(cb);
+    }
+    for (QSpinBox* sb : {m_nodesBox, m_tasksBox, m_cpusPerTaskBox, m_gpusBox}) {
+        connect(sb, &QSpinBox::valueChanged, this, [this, sb](int) {
+            if (m_updatingWidgets) return;
+            if (sb == m_nodesBox || sb == m_tasksBox) m_parsedExplicitNtasks = 0;
+            syncTemplateFromFieldsIfAuto();
+        });
+    }
+    connect(m_gpuCheck, &QCheckBox::toggled, this, [this](bool) {
+        if (!m_updatingWidgets) syncTemplateFromFieldsIfAuto();
+    });
+    connect(m_templateEdit, &QPlainTextEdit::textChanged, this, [this]() {
+        if (m_updatingWidgets) return;
+        m_templateManuallyEdited = true;
+        m_updatingWidgets = true;
+        parseDirectivesIntoFields(m_templateEdit->toPlainText(), false);
+        m_updatingWidgets = false;
+    });
+
     loadFromSettings();
+}
+
+void HpcIntegrationSettingsPage::syncTemplateFromFieldsIfAuto() {
+    if (m_updatingWidgets || m_templateManuallyEdited) return;
+    m_updatingWidgets = true;
+    m_templateEdit->setPlainText(generateSlurmBatchScript());
+    m_updatingWidgets = false;
 }
 
 QString HpcIntegrationSettingsPage::sshHost() const { return m_sshHostEdit->text().trimmed(); }
 QString HpcIntegrationSettingsPage::sshUser() const { return m_sshUserEdit->text().trimmed(); }
 QString HpcIntegrationSettingsPage::sshKeyPath() const { return m_sshKeyEdit->text().trimmed(); }
-QString HpcIntegrationSettingsPage::slurmTemplate() const { return m_templateEdit->toPlainText(); }
+QString HpcIntegrationSettingsPage::slurmTemplate() const {
+    return m_templateManuallyEdited ? m_templateEdit->toPlainText() : generateSlurmBatchScript();
+}
 QString HpcIntegrationSettingsPage::slurmPartition() const { return m_partitionCombo->currentText().trimmed(); }
 int HpcIntegrationSettingsPage::slurmNodes() const { return m_nodesBox->value(); }
 int HpcIntegrationSettingsPage::slurmTasks() const { return m_tasksBox->value(); }
 bool HpcIntegrationSettingsPage::requestGpus() const { return m_gpuCheck->isChecked(); }
 int HpcIntegrationSettingsPage::gpusPerNode() const { return m_gpusBox->value(); }
+QString HpcIntegrationSettingsPage::jobName() const { return m_jobNameEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::account() const { return m_accountEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::qos() const { return m_qosCombo->currentText().trimmed(); }
+QString HpcIntegrationSettingsPage::wallTime() const { return m_timeCombo->currentText().trimmed(); }
+int HpcIntegrationSettingsPage::cpusPerTask() const { return m_cpusPerTaskBox->value(); }
+QString HpcIntegrationSettingsPage::memory() const {
+    if (!m_parsedMemPerCpu.isEmpty() && m_memCombo->currentText().trimmed().isEmpty()) {
+        return QStringLiteral("per-cpu:%1").arg(m_parsedMemPerCpu);
+    }
+    return m_memCombo->currentText().trimmed();
+}
+QString HpcIntegrationSettingsPage::gpuType() const { return m_gpuTypeEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::constraint() const { return m_constraintEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::mpiLauncher() const { return m_mpiLauncherCombo->currentText().trimmed(); }
+QString HpcIntegrationSettingsPage::modules() const { return m_modulesEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::outputLog() const { return m_outputLogEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::errorLog() const { return m_errorLogEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::mailType() const { return m_mailTypeCombo->currentText().trimmed(); }
+QString HpcIntegrationSettingsPage::mailUser() const { return m_mailUserEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::scriptPath() const { return m_sbatchFilePathEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::sbatchPath() const {
+    const QString v = m_sbatchPathEdit->text().trimmed();
+    return v.isEmpty() ? QStringLiteral("sbatch") : v;
+}
+QString HpcIntegrationSettingsPage::squeuePath() const {
+    const QString v = m_squeuePathEdit->text().trimmed();
+    return v.isEmpty() ? QStringLiteral("squeue") : v;
+}
+QString HpcIntegrationSettingsPage::scontrolPath() const {
+    const QString v = m_scontrolPathEdit->text().trimmed();
+    return v.isEmpty() ? QStringLiteral("scontrol") : v;
+}
 QString HpcIntegrationSettingsPage::spackRoot() const { return m_spackRootEdit->text().trimmed(); }
+
+gridlock::core::SlurmSettings HpcIntegrationSettingsPage::toSlurmSettings() const {
+    gridlock::core::SlurmSettings sl;
+    sl.scriptTemplate = slurmTemplate();
+    sl.partition = slurmPartition();
+    sl.nodes = slurmNodes();
+    sl.tasksPerNode = slurmTasks();
+    sl.requestGpus = requestGpus();
+    sl.gpusPerNode = gpusPerNode();
+    sl.spackRoot = spackRoot();
+    sl.jobName = jobName();
+    sl.account = account();
+    sl.qos = qos();
+    sl.wallTime = wallTime();
+    sl.cpusPerTask = cpusPerTask();
+    sl.memory = memory();
+    sl.gpuType = gpuType();
+    sl.constraint = constraint();
+    sl.mpiLauncher = mpiLauncher();
+    sl.modules = modules();
+    sl.outputLog = outputLog();
+    sl.errorLog = errorLog();
+    sl.mailType = mailType();
+    sl.mailUser = mailUser();
+    sl.scriptPath = scriptPath();
+    sl.sbatchPath = sbatchPath();
+    sl.squeuePath = squeuePath();
+    sl.scontrolPath = scontrolPath();
+    return sl;
+}
 
 void HpcIntegrationSettingsPage::loadFromSettings() {
     auto& mgr = gridlock::core::ConfigManager::instance();
     const auto ssh = mgr.getSshSettings();
     const auto slurm = mgr.getSlurmSettings();
 
+    m_updatingWidgets = true;
+    m_parsedExplicitNtasks = 0;
+    m_parsedMemPerCpu.clear();
+    m_parsedChdir.clear();
+    m_parsedExclusive = false;
+
     m_sshHostEdit->setText(ssh.host);
     m_sshUserEdit->setText(ssh.user);
     m_sshKeyEdit->setText(ssh.keyPath);
 
-    m_jobNameEdit->setText(QStringLiteral("gridlock_debug"));
+    m_sbatchFilePathEdit->setText(slurm.scriptPath);
+    m_jobNameEdit->setText(slurm.jobName.isEmpty() ? QStringLiteral("gridlock_debug") : slurm.jobName);
+    m_accountEdit->setText(slurm.account);
     setComboTextValue(m_partitionCombo, slurm.partition.isEmpty() ? QStringLiteral("batch") : slurm.partition);
+    setComboTextValue(m_qosCombo, slurm.qos.isEmpty() ? QStringLiteral("(default)") : slurm.qos);
+    setComboTextValue(m_timeCombo, slurm.wallTime.isEmpty() ? QStringLiteral("01:00:00") : slurm.wallTime);
     m_nodesBox->setValue(qMax(1, slurm.nodes));
     m_tasksBox->setValue(qMax(1, slurm.tasksPerNode));
+    m_cpusPerTaskBox->setValue(qMax(1, slurm.cpusPerTask));
+    if (slurm.memory.startsWith(QStringLiteral("per-cpu:"), Qt::CaseInsensitive)) {
+        m_parsedMemPerCpu = slurm.memory.mid(8).trimmed();
+        setComboTextValue(m_memCombo, QString());
+    } else {
+        setComboTextValue(m_memCombo, slurm.memory);
+    }
     m_gpuCheck->setChecked(slurm.requestGpus);
+    m_gpuTypeEdit->setText(slurm.gpuType);
+    m_gpuTypeEdit->setEnabled(slurm.requestGpus);
     m_gpusBox->setValue(qMax(1, slurm.gpusPerNode));
+    m_gpusBox->setEnabled(slurm.requestGpus);
+    m_constraintEdit->setText(slurm.constraint);
+    setComboTextValue(m_mpiLauncherCombo, slurm.mpiLauncher.isEmpty() ? QStringLiteral("srun") : slurm.mpiLauncher);
+    m_modulesEdit->setText(slurm.modules);
+    m_outputLogEdit->setText(slurm.outputLog);
+    m_errorLogEdit->setText(slurm.errorLog);
+    setComboTextValue(m_mailTypeCombo, slurm.mailType.isEmpty() ? QStringLiteral("NONE") : slurm.mailType);
+    m_mailUserEdit->setText(slurm.mailUser);
+    m_sbatchPathEdit->setText(slurm.sbatchPath.isEmpty() ? QStringLiteral("sbatch") : slurm.sbatchPath);
+    m_squeuePathEdit->setText(slurm.squeuePath.isEmpty() ? QStringLiteral("squeue") : slurm.squeuePath);
+    m_scontrolPathEdit->setText(slurm.scontrolPath.isEmpty() ? QStringLiteral("scontrol") : slurm.scontrolPath);
     m_spackRootEdit->setText(slurm.spackRoot);
 
+    const QString generated = generateSlurmBatchScript();
     if (!slurm.scriptTemplate.trimmed().isEmpty()) {
-        parseSlurmBatchScript(slurm.scriptTemplate);
+        m_templateEdit->setPlainText(slurm.scriptTemplate);
+        m_templateManuallyEdited = (slurm.scriptTemplate.trimmed() != generated.trimmed());
     } else {
-        m_templateEdit->setPlainText(generateSlurmBatchScript());
+        m_templateEdit->setPlainText(generated);
+        m_templateManuallyEdited = false;
     }
+    m_updatingWidgets = false;
 }
 
 }  // namespace gridlock::ui
