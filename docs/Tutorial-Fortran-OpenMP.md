@@ -1,6 +1,6 @@
 # Hybrid MPI + OpenMP Fortran Debugging Tutorial
 
-This hands-on tutorial demonstrates how to debug a hybrid **MPI + OpenMP Fortran** scientific code ([`examples/fortran_openmp/stencil_omp.f90`](../examples/fortran_openmp/stencil_omp.f90)) in GridLock. You will practice navigating both MPI ranks and OpenMP worker threads, stepping a single OpenMP thread cleanly with `scheduler-locking`, evaluating 1-based Fortran slice expressions, and inspecting column-major 2D arrays in GridLock's **Array & Field Plotter** (`Ctrl+Alt+G`).
+This hands-on tutorial demonstrates how to debug a hybrid **MPI + OpenMP Fortran** scientific code ([`tutorial/stencil_omp.f90`](../tutorial/stencil_omp.f90)) in GridLock. You will practice navigating both MPI ranks and OpenMP worker threads, stepping a single OpenMP thread cleanly with `scheduler-locking`, evaluating 1-based Fortran slice expressions, and inspecting column-major 2D arrays in GridLock's **Array & Field Plotter** (`Ctrl+Alt+G`).
 
 ---
 
@@ -43,15 +43,16 @@ Inside an `!$omp parallel default(none)` region, OpenMP threads compute a 5-poin
 ### Local Multi-Rank Launch (`mpirun`)
 
 1. Build the tutorial executable from the repository root:
+   * **Automatic Meson target** (built automatically by `ninja -C builddir` whenever `mpif90` is on `PATH`, producing `builddir/stencil_omp`), or compile directly into `tutorial/`:
    ```bash
-   make -C examples/fortran_openmp
+   mpif90 -g -O0 -fopenmp -Wall -Wextra -fcheck=bounds,do,mem tutorial/stencil_omp.f90 -o tutorial/stencil_omp
    ```
-   *(For Intel `ifx`: `make -C examples/fortran_openmp FC=mpiifx FFLAGS="-g -O0 -qopenmp -warn all"`.)*
+   *(For Intel `ifx`: `mpiifx -g -O0 -qopenmp -warn all tutorial/stencil_omp.f90 -o tutorial/stencil_omp`.)*
 2. Launch GridLock with `OMP_NUM_THREADS=4` exported in your shell environment (so each MPI rank spawns 4 OpenMP worker threads):
    ```bash
    OMP_NUM_THREADS=4 gridlock
    ```
-3. Open [`examples/fortran_openmp/stencil_omp.f90`](../examples/fortran_openmp/stencil_omp.f90) via **File -> Open Source File...**, and load `examples/fortran_openmp/stencil_omp` via **TARGET: -> Open ELF / Binary...**.
+3. Select **`stencil_omp (Fortran MPI+OpenMP)`** from the **`TARGET:`** dropdown (or open [`tutorial/stencil_omp.f90`](../tutorial/stencil_omp.f90) via **File -> Open Source File...** and load `tutorial/stencil_omp` or `builddir/stencil_omp` via **TARGET: -> Open ELF / Binary...**).
 4. Set **RANKS (-np):** on the top toolbar to **`2`** (giving `2 MPI ranks x 4 OpenMP threads = 8` concurrent workers).
 
 ### Optional Slurm Batch Launch

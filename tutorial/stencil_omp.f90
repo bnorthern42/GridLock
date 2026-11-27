@@ -1,9 +1,9 @@
-! examples/fortran_openmp/stencil_omp.f90
+! tutorial/stencil_omp.f90
 ! Hybrid MPI + OpenMP 2D column-major stencil tutorial for GridLock.
 ! Build with gfortran/OpenMPI:
-!   mpif90 -g -O0 -fopenmp -Wall -Wextra -fcheck=bounds,do,mem stencil_omp.f90 -o stencil_omp
+!   mpif90 -g -O0 -fopenmp -Wall -Wextra -fcheck=bounds,do,mem tutorial/stencil_omp.f90 -o tutorial/stencil_omp
 ! Build with Intel ifx/Intel MPI:
-!   mpiifx -g -O0 -qopenmp -warn all stencil_omp.f90 -o stencil_omp
+!   mpiifx -g -O0 -qopenmp -warn all tutorial/stencil_omp.f90 -o tutorial/stencil_omp
 
 program stencil_omp
   use iso_fortran_env, only: real64

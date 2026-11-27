@@ -204,7 +204,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             {QStringLiteral("ghost_cell_drift (MPI)"), QStringLiteral("tutorial/ghost_cell_drift.cpp")},
             {QStringLiteral("heap_imbalance (MPI)"), QStringLiteral("tutorial/heap_imbalance.cpp")},
             {QStringLiteral("tag_mismatch_stall (MPI)"), QStringLiteral("tutorial/tag_mismatch_stall.cpp")},
-            {QStringLiteral("simd_struct_watch (MPI)"), QStringLiteral("tutorial/simd_struct_watch.cpp")}};
+            {QStringLiteral("simd_struct_watch (MPI)"), QStringLiteral("tutorial/simd_struct_watch.cpp")},
+            {QStringLiteral("stencil_omp (Fortran MPI+OpenMP)"), QStringLiteral("tutorial/stencil_omp.f90")}};
         for (const auto& entry : showcaseTargets) {
             const bool localExists = QFileInfo::exists(entry.second) || QFileInfo::exists(QStringLiteral("../") + entry.second);
             const QString targetData = localExists ? entry.second : resolveTutorialTarget(entry.second);

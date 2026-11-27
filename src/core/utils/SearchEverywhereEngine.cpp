@@ -254,6 +254,7 @@ QVector<IndexedFile> SearchEverywhereEngine::discoverPrioritizedFiles(const QStr
         const QString ext = fi.suffix().toLower();
         QString badge = QStringLiteral("File");
         if (ext == QStringLiteral("cpp") || ext == QStringLiteral("cc") || ext == QStringLiteral("c") || ext == QStringLiteral("cu")) badge = QStringLiteral("C/C++");
+        else if (ext == QStringLiteral("f90") || ext == QStringLiteral("f95") || ext == QStringLiteral("f03") || ext == QStringLiteral("f08") || ext == QStringLiteral("f") || ext == QStringLiteral("for")) badge = QStringLiteral("Fortran");
         else if (ext == QStringLiteral("hpp") || ext == QStringLiteral("h")) badge = QStringLiteral("Header");
         else if (fi.fileName() == QStringLiteral("meson.build") || fi.fileName() == QStringLiteral("CMakeLists.txt")) badge = QStringLiteral("Build");
         result.append(IndexedFile{rel, abs, badge});
@@ -261,7 +262,7 @@ QVector<IndexedFile> SearchEverywhereEngine::discoverPrioritizedFiles(const QStr
     for (const QString& tutRel : {QStringLiteral("tutorial/inspection_demo.cpp"), QStringLiteral("tutorial/deadlock_ring.cpp"),
                                   QStringLiteral("tutorial/collective_mismatch.cpp"), QStringLiteral("tutorial/ghost_cell_drift.cpp"),
                                   QStringLiteral("tutorial/heap_imbalance.cpp"), QStringLiteral("tutorial/tag_mismatch_stall.cpp"),
-                                  QStringLiteral("tutorial/simd_struct_watch.cpp")}) {
+                                  QStringLiteral("tutorial/simd_struct_watch.cpp"), QStringLiteral("tutorial/stencil_omp.f90")}) {
         QString abs = rootDir.filePath(tutRel);
         if (!QFileInfo::exists(abs) && QFileInfo::exists(tutRel)) abs = QFileInfo(tutRel).absoluteFilePath();
         pushFile(tutRel, abs);

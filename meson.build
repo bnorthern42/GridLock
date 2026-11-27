@@ -943,3 +943,13 @@ custom_target('catchpoint_exceptions_bin',
   command: ['mpicxx', '-g', '-O0', '@INPUT@', '-o', '@OUTPUT@'],
   build_by_default: true
 )
+
+mpif90_prog = find_program('mpif90', required: false)
+if mpif90_prog.found()
+  custom_target('stencil_omp_bin',
+    input: 'tutorial/stencil_omp.f90',
+    output: 'stencil_omp',
+    command: [mpif90_prog, '-g', '-O0', '-fopenmp', '-Wall', '-Wextra', '-fcheck=bounds,do,mem', '@INPUT@', '-o', '@OUTPUT@'],
+    build_by_default: true
+  )
+endif

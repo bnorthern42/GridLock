@@ -3,7 +3,7 @@
 This hands-on guide walks you through finding, inspecting, and fixing real parallel C++ and MPI bugs in GridLock. Every lab uses a runnable program from the `tutorial/` folder, shows the exact C++ code from disk, and tells you each button, tab, and line number to click.
 
 > [!TIP]
-> Debugging hybrid MPI + OpenMP Fortran (`gfortran` / `ifx`)? See the dedicated [Hybrid MPI + OpenMP Fortran Debugging Tutorial](Tutorial-Fortran-OpenMP.md) and runnable example in [`examples/fortran_openmp/`](../examples/fortran_openmp/).
+> Debugging hybrid MPI + OpenMP Fortran (`gfortran` / `ifx`)? See the dedicated [Hybrid MPI + OpenMP Fortran Debugging Tutorial](Tutorial-Fortran-OpenMP.md) and runnable example in [`tutorial/stencil_omp.f90`](../tutorial/stencil_omp.f90).
 
 ---
 
