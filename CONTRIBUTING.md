@@ -9,7 +9,7 @@ Thank you for your interest in contributing to GridLock (`v0.9.1`). GridLock is 
 Before making changes, review the architecture and extension guides on the [GridLock GitHub Wiki](https://github.com/bnorthern42/GridLock/wiki):
 
 * [**Installation and Building**](https://github.com/bnorthern42/GridLock/wiki/Installation-and-Building): Distro packages (Arch, Ubuntu/Debian, Fedora), `Qt-Advanced-Stylesheets` submodule setup, and Meson/Ninja targets.
-* [**Developer Architecture and Testing**](https://github.com/bnorthern42/GridLock/wiki/Developer-Architecture-and-Testing): Sub-500-line modular layout, CLI flags, coordinator architecture, and all 24 Meson test suites.
+* [**Developer Architecture and Testing**](https://github.com/bnorthern42/GridLock/wiki/Developer-Architecture-and-Testing): Modular layout, CLI flags, coordinator architecture, and all 24 Meson test suites.
 * [**Using Plugins in GridLock**](https://github.com/bnorthern42/GridLock/wiki/Plugins): End-user multi-forge plugin installation, `plugins.toml` / `plugins-lock.toml` sync, and workspace `SHA-256` trust.
 * [**Plugin Architecture, Lifecycle & Security (Vol. 1)**](https://github.com/bnorthern42/GridLock/wiki/Plugin-Architecture-and-Lifecycle): Host ownership, pre-`dlopen` verification, `PluginVerifier`, `hotReloadPlugins`, and resource quotas.
 * [**C99 Plugin ABI & C++23 Wrappers (Vol. 2)**](https://github.com/bnorthern42/GridLock/wiki/Plugin-C99-ABI-Reference): Frozen 64-bit struct layouts, status/UI enums, all 28 `GridLockHostApi` callbacks, and `plugin_cpp_helpers.hpp`.
@@ -40,8 +40,8 @@ ninja -C builddir
 All 24 Meson test suites run headlessly under `QT_QPA_PLATFORM=offscreen` and isolate configuration into temporary directories automatically:
 
 ```bash
-# Run all 24 Meson test suites:
-meson test -C builddir --print-errorlogs
+# Run all 24 Meson test suites headlessly:
+QT_QPA_PLATFORM=offscreen meson test -C builddir --print-errorlogs
 
 # Run the headless workstation UI test suite directly:
 QT_QPA_PLATFORM=offscreen ./builddir/gridlock_ui_tests
@@ -52,26 +52,44 @@ QT_QPA_PLATFORM=offscreen ./builddir/gridlock_ui_tests
 
 ---
 
-## 3. Code Style & Architectural Standards
+## 3. Core Contribution Standards (Human & AI-Assisted PRs)
 
-* **Google C++ Style Guide**:
-  * Core and UI code uses **C++23** (`-Wall -Wextra -Wpedantic`), `#pragma once`, strict `const` correctness, `override` on virtual overrides, in-class scalar initialization, and Qt parent-child or `std::unique_ptr` ownership.
-  * Native plugin ABI headers (`include/gridlock/plugin_api.h`) use strict **C99** with zero C++ standard library or Qt dependencies.
-* **Strict File-Length Discipline (`< 800` Lines)**:
-  * Keep every source and header file under `800` lines (targeting `< 500` lines per cohesive module). Split new docks, dialogs, views, or core subsystems into dedicated translation units rather than growing monolithic files.
-* **Frozen C99 Plugin ABI (`v1.0`) Rules**:
-  * Every callback uses `GRIDLOCK_CALL`, fixed-width integers (`int32_t`, `uint32_t`, `uint64_t`), and 16-byte `(struct_size, abi_major, abi_minor, reserved_flags)` version headers at offset `0`.
-  * Never shift existing field offsets or remove slots; lock every struct `sizeof` and `offsetof` with `static_assert` in `tests/core/test_plugin_abi.cpp`, and keep zero Qt types in `plugin_api.h`.
-* **Documentation Prose Rules**:
-  * Write clear, direct technical prose without em-dashes, en-dashes, or marketing filler. Update the corresponding per-directory `README.md` whenever adding, moving, or splitting files.
+### 3.1 Reproducer-First Policy for Cluster & Hardware Bugs
+Maintainers do not have local access to every HPC cluster configuration (such as NVIDIA H200 / Grace Hopper nodes, Cray PMI, proprietary MPI stacks, custom GPU `rocgdb` / `cuda-gdb` builds, or site-specific Slurm setups). Bug reports and PRs targeting environments that cannot be reproduced locally **must** attach:
+
+1. An exported **Sanitized GDB/MI Trace** generated via **Tools -> Export Sanitized GDB/MI Trace...** (or `./gridlock --export-mi-trace /path/to/trace.mi.log`), which automatically redacts home/work/scratch paths, usernames, hostnames, and `-gdb-set environment` values while preserving exact MI syntax.
+2. Exact debugger version output (`gdb --version`, `rocgdb --version`, or `lldb-dap --version`).
+3. MPI implementation, version, and launcher command line (for example, `mpirun --version` / `srun --version` and relevant flags).
+
+This allows maintainers to replay the exact wire sequence deterministically inside `GdbMiParser` and launcher unit tests.
+
+### 3.2 Mandatory Regression Test Coverage
+Every bug fix or parser/launcher change **must** add or update a deterministic unit test or headless UI test (`QT_QPA_PLATFORM=offscreen meson test -C builddir --print-errorlogs`) that fails before the patch and passes after it. Pull requests for bug fixes without regression tests will not be merged.
+
+### 3.3 Small, Auditable Diffs & Architectural Boundaries
+* Keep each pull request focused on a single concern; avoid sprawling multi-subsystem rewrites or speculative refactors.
+* Preserve subsystem boundaries: keep GDB/MI parsing inside `src/core/hpc/gdb/GdbMiParser.*`, JSON-RPC framing inside `src/core/utils/JsonRpcFramer.hpp`, and MPI/Slurm command/environment builders inside their dedicated core classes (`GdbRankCoordinator`, `LocalSlurmBackend`) rather than scattering regexes or shell logic across UI widgets.
+* Verify root cause before proposing a fix; do not submit blind or unverified patches.
+
+### 3.4 Code Hygiene & Strict File-Length Ceiling (`< 800` Lines)
+* **Google C++ Style Guide**: Core and UI code uses **C++23** (`-Wall -Wextra -Wpedantic`), `#pragma once`, strict `const` correctness, `override` on virtual overrides, in-class scalar initialization, and Qt parent-child or `std::unique_ptr` ownership.
+* **Strict `< 800`-Line Ceiling (`agent.md`)**: Every C++ source (`.cpp`) and header (`.hpp`) file must stay strictly under `800` lines (targeting `< 500` lines per cohesive module). Before adding code to a file approaching `800` lines, extract cohesive helpers into a dedicated translation unit or header.
+* **Zero Compiler Warnings**: All targets (`gridlock` and every test suite) must build cleanly under `-Wall -Wextra -Wpedantic`.
+* **Documentation Prose Rules**: Write clear, direct technical prose without em-dashes, en-dashes, or marketing filler. Update the corresponding per-directory `README.md` whenever adding, moving, or splitting files.
+
+### 3.5 Frozen Plugin C ABI Stability (`include/gridlock/plugin_api.h`)
+* Native plugin ABI headers (`include/gridlock/plugin_api.h`) use strict **C99** with zero C++ standard library or Qt dependencies.
+* Every callback uses `GRIDLOCK_CALL`, fixed-width integers (`int32_t`, `uint32_t`, `uint64_t`), and 16-byte `(struct_size, abi_major, abi_minor, reserved_flags)` version headers at offset `0`.
+* **Never reorder, remove, or change the signature of existing function pointers** in `GridLockHostApi` or `GridLockPluginDescriptor`. Lock every struct `sizeof` and `offsetof` with `static_assert` in `tests/core/test_plugin_abi.cpp`.
+* Extensions for experimental languages (such as Odin, Zig, or Rust) or domain-specific visualizers should target the versioned C ABI (`gridlock_plugin_init_v1`) wherever possible rather than adding heavy language-specific dependencies to core.
 
 ---
 
-## 4. Pull Request Expectations
+## 4. Pull Request Workflow
 
 1. **Branch off `master`** with a descriptive branch name (for example, `feat/...` or `fix/...`) and keep commits focused and atomic.
-2. **Pass all checks with zero compiler warnings**: Verify `ninja -C builddir`, `meson test -C builddir --print-errorlogs`, and `QT_QPA_PLATFORM=offscreen ./builddir/gridlock_ui_tests` before opening a PR.
-3. **Attach workstation screenshots for UI changes**: For any UI, widget, layout, or theme change, generate and attach actual `.png` captures (`bash scripts/capture_ui.sh`) in the pull request description.
-4. **Bug reports**: Open an issue using the structured templates under `.github/ISSUE_TEMPLATE/` and include your MPI implementation/version, rank count, and relevant GDB/MI output logs.
+2. **Verify locally before opening a PR**: Run `ninja -C builddir`, `QT_QPA_PLATFORM=offscreen meson test -C builddir --print-errorlogs`, and `QT_QPA_PLATFORM=offscreen ./builddir/gridlock_ui_tests`, confirming zero warnings and zero test failures.
+3. **Complete the PR template**: Fill out `.github/pull_request_template.md`, including root cause, sanitized GDB/MI trace or reproducer (for debugger/cluster changes), regression tests, and `.png` screenshots (`bash scripts/capture_ui.sh`) for UI changes.
+4. **Bug reports**: Open an issue using `.github/ISSUE_TEMPLATE/bug_report.yml` with your GridLock version, cluster/OS environment, `gdb --version`, MPI launcher details, and an attached **Sanitized GDB/MI Trace**.
 
 Thank you for helping improve GridLock.

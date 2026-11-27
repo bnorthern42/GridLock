@@ -1,6 +1,6 @@
-## Summary
+## Summary & Root Cause
 
-<!-- Describe the bug fix, feature, or refactor, including the root cause or technical motivation. -->
+<!-- Describe the problem, verified root cause, and technical motivation. Do not submit unverified or blind changes. -->
 
 ## Related Issues
 
@@ -8,14 +8,16 @@
 - Closes #
 - Relates to #
 
+## Reproducer / Sanitized GDB/MI Trace (Required for GDB, MPI, Slurm, or Cluster Fixes)
+
+<!-- For debugger, parser, MPI launcher, or HPC cluster fixes, attach a Sanitized GDB/MI Trace (Tools -> Export Sanitized GDB/MI Trace... or `--export-mi-trace <file>`) plus `gdb --version` and MPI launcher command line, or note "N/A". -->
+
 ## Changes Made
 
-<!-- List the modified subsystems and key behavioral changes. -->
+<!-- Keep diffs small, auditable, and focused on a single concern. -->
 - `src/core/hpc`:
-- `src/core/dap`:
-- `src/ui/views`:
-- `src/ui/docks`:
-- `src/ui/dialogs`:
+- `src/core/plugins`:
+- `src/ui/`:
 - `tests/`:
 
 ## UI Screenshots (Required for UI / Widget / Theme Changes)
@@ -26,20 +28,17 @@
 | :--- | :--- |
 | <!-- Paste before.png here or "N/A (non-UI change)" --> | <!-- Paste after.png here or "N/A (non-UI change)" --> |
 
-## Verification & Testing
+## Mandatory PR Checklist
 
-- [ ] Compiles cleanly with zero warnings (`ninja -C builddir`).
-- [ ] All Meson test suites pass (`meson test -C builddir --print-errorlogs`).
-- [ ] Headless UI test suite passes (`QT_QPA_PLATFORM=offscreen ./builddir/gridlock_ui_tests`).
-- [ ] Manually tested against an MPI/C++ target (if touching debugger backends or UI docks).
+- [ ] Summary of problem and verified root cause included (no unverified/blind changes).
+- [ ] Sanitized GDB/MI trace or minimal reproducer attached (required for GDB/MPI/Slurm/cluster fixes).
+- [ ] Added or updated unit / headless UI regression test covering the change (fails before fix, passes after).
+- [ ] Built and verified locally with zero warnings (`ninja -C builddir` and `QT_QPA_PLATFORM=offscreen meson test -C builddir --print-errorlogs`).
+- [ ] All modified and new C++ source and header files are strictly under `800` lines (`agent.md`).
+- [ ] Plugin C ABI (`include/gridlock/plugin_api.h`) backward compatibility preserved (no reordered, removed, or altered callback signatures).
+- [ ] No `.gridlock/` or temporary build artifacts are staged, and no unit tests scrape `.md` documentation files.
 
-## Code Standards Checklist
-
-- [ ] Adheres to the Google C++ Style Guide and repository `agent.md` invariants (`< 950` lines per file, no bulk script mutations).
-- [ ] No unit tests scrape `.md` documentation or source files on disk.
-- [ ] `.gridlock/` or temporary build artifacts are not staged.
-
-## Accessibility Checklist
+## Accessibility Checklist (For UI Changes)
 
 - [ ] Keyboard navigation (`Tab` order, shortcuts, `Esc` / close buttons) works end-to-end for modified dialogs and widgets.
 - [ ] Visible focus indicators are preserved on interactive controls.

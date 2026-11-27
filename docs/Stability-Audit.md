@@ -151,8 +151,8 @@ Baseline inventory across `src/`, `include/`, and `tests/` (`agent.md` ceiling: 
 
 ### Recommended Diagnostic & PR Gate Improvements
 
-1. **Sanitized MI / DAP Session Trace Export**: Add a **Help -> Export Sanitized Debug Trace...** action that captures the last `N` GDB/MI or DAP lines (redacting hostnames, usernames, file paths, and literal memory contents) into a single text bundle so cluster users can attach reproducible bug reports across GDB 12/14/16+, OpenMPI, MPICH, and Slurm versions.
-2. **Golden GDB/MI Fixture Test Suite (`tests/hpc/fixtures/`)**: Store real captured GDB/MI3 transcripts from GDB 12, GDB 14, GDB 16, `gfortran`, `ifx`, `rocgdb`, `libstdc++` pretty-printers, and `libc++` pretty-printers and replay them deterministically through `GdbRankCoordinator::processGdbOutput(...)` on every PR.
-3. **CI File-Size & Hygiene Gate (`CONTRIBUTING.md` + GitHub Actions)**:
-   - Enforce a CI check rejecting any new C++ file `>= 800` lines and failing if any existing watchlisted file (`>= 800` lines) grows further without splitting.
-   - Enforce a minimal-dependencies headless HPC build job (`-Dqtermwidget=disabled`) alongside the default build + `QT_QPA_PLATFORM=offscreen meson test -C builddir --print-errorlogs`.
+- [x] **Sanitized MI Session Trace Export**: Implemented `GdbMiTranscriptRecorder` (`4,096` lines / `2 MiB` ring buffer), deterministic path/user/host/env redaction, **Tools -> Export Sanitized GDB/MI Trace...**, and `--export-mi-trace <file>` so cluster users can attach reproducible bug reports across GDB 12/14/16+, OpenMPI, MPICH, and Slurm versions.
+- [x] **Contributor & PR Gate Policy (`CONTRIBUTING.md`, `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/bug_report.yml`)**: Documented the reproducer-first sanitized GDB/MI trace policy for unreproducible cluster/hardware bugs, mandatory failing-before / passing-after regression tests (`QT_QPA_PLATFORM=offscreen meson test`), `< 800`-line C++ file ceiling, and frozen `include/gridlock/plugin_api.h` compatibility rules.
+- [ ] **Golden GDB/MI Fixture Test Suite (`tests/hpc/fixtures/`) & Minimal-HPC CI Matrix**:
+  - Store real captured GDB/MI3 transcripts from GDB 12/14/16, `gfortran`, `ifx`, `rocgdb`, and `libstdc++`/`libc++` pretty-printers and replay them deterministically on every PR.
+  - Enforce automated GitHub Actions checks for `< 800`-line file growth and minimal-dependency headless HPC builds (`-Dqtermwidget=disabled -Dsvg=disabled`).

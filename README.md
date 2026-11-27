@@ -152,7 +152,7 @@ All documentation in `docs/` is automatically mirrored to the [GridLock GitHub W
 
 * [**Changelog (`CHANGELOG.md`)**](CHANGELOG.md): Version history and release notes.
 * [**Accessibility Statement (`ACCESSIBILITY.md`)**](ACCESSIBILITY.md): Keyboard navigation, contrast themes, colorblind-safe palettes, AT-SPI2 support, and barrier reporting.
-* [**Contributing Guide (`CONTRIBUTING.md`)**](CONTRIBUTING.md): Coding standards (`< 950` lines per file, C++23, Meson tests) and pull request workflow.
+* [**Contributing Guide (`CONTRIBUTING.md`)**](CONTRIBUTING.md): Reproducer-first sanitized GDB/MI trace policy, mandatory headless Meson regression tests, `< 800`-line file ceiling, and frozen C ABI rules.
 * [**Security Policy (`SECURITY.md`)**](SECURITY.md): Vulnerability reporting and `MiSanitizer` / `MemoryBoundsValidator` hardening boundaries.
 * [**License (`LICENSE`)**](LICENSE): MIT License.
 

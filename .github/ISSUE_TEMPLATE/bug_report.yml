@@ -44,25 +44,25 @@ body:
     attributes:
       label: GridLock Version
       description: Output of `./gridlock --version` or release tag
-      placeholder: "v0.8.6"
+      placeholder: "v0.9.1"
     validations:
       required: true
 
   - type: input
     id: os_display
     attributes:
-      label: OS & Display Server
-      description: Linux distribution and Wayland compositor or X11 window manager
-      placeholder: "Arch Linux / Wayland (niri)"
+      label: OS, Cluster Environment & Display Server
+      description: Linux distro / HPC cluster (e.g., Slurm login/compute node, GPU node) and Wayland/X11/offscreen setup
+      placeholder: "Rocky Linux 9 / Slurm + H200 or Fedora / Wayland"
     validations:
       required: true
 
   - type: input
     id: toolchain_versions
     attributes:
-      label: Compiler, MPI & Debugger Versions
-      description: Versions of GCC/Clang, OpenMPI/MPICH, and GDB/LLDB
-      placeholder: "GCC 14, OpenMPI 5.0, GDB 15.2"
+      label: Compiler, MPI & Debugger Versions (`gdb --version`)
+      description: Exact versions of compiler (GCC/Clang/gfortran/ifx), MPI implementation & launcher flags (OpenMPI/MPICH/Intel MPI/Cray PMI), and `gdb --version` / `rocgdb --version` / `lldb-dap --version`
+      placeholder: "GCC 14 / gfortran 14, OpenMPI 5.0 (mpirun --oversubscribe), GNU gdb 15.2"
     validations:
       required: false
 
@@ -70,7 +70,7 @@ body:
     id: steps_to_reproduce
     attributes:
       label: Steps to Reproduce
-      description: Exact numbered steps to trigger the issue (include MPI rank count if relevant).
+      description: Exact numbered steps to trigger the issue (include MPI rank count and launcher command line if relevant).
       placeholder: |
         1. Launch GridLock with ...
         2. Set breakpoint on ...
@@ -87,9 +87,20 @@ body:
       required: true
 
   - type: textarea
+    id: sanitized_mi_trace
+    attributes:
+      label: Sanitized GDB/MI Trace (Required for Debugger, Parser, MPI, or Cluster Bugs)
+      description: Export a redacted transcript via **Tools -> Export Sanitized GDB/MI Trace...** (or `./gridlock --export-mi-trace trace.mi.log`) and paste or attach it here so maintainers can replay the exact MI sequence in a unit test.
+      placeholder: |
+        # GridLock Sanitized GDB/MI Session Trace
+        # Paste or drag-and-drop your .mi.log file here...
+    validations:
+      required: false
+
+  - type: textarea
     id: logs_and_screenshots
     attributes:
-      label: Logs, Backtrace, or Screenshots
-      description: Paste terminal output, `process_vm_readv` / GDB errors, or attach `.png` screenshots (`.png` screenshots are welcome for UI issues).
+      label: Additional Logs, Backtrace, or Screenshots
+      description: Paste terminal output, `process_vm_readv` / Slurm errors, or attach `.png` screenshots (`.png` screenshots are welcome for UI issues).
     validations:
       required: false
