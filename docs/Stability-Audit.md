@@ -88,17 +88,17 @@ Baseline inventory across `src/`, `include/`, and `tests/` (`agent.md` ceiling: 
 
 ### 3.2 MPI Launchers, Slurm, & Cluster Environment
 
-- [ ] **Remove unconditional OpenMPI `LD_LIBRARY_PATH` injection**:
-  - `src/core/hpc/gdb/GdbRankCoordinator.cpp:441` unconditionally prepends `/usr/lib64/openmpi/lib:/usr/lib/openmpi/lib:` to `LD_LIBRARY_PATH`. On clusters running MPICH, MVAPICH2, Cray MPICH, Intel MPI, or Spack-built OpenMPI, this can shadow the active module's `libmpi.so` and crash MPI initialization. Only append system OpenMPI directories when `mpiBin` resolves under `/usr/lib64/openmpi` or `/usr/lib/openmpi` (or provide a user-overridable toggle).
+- [x] **Remove unconditional OpenMPI `LD_LIBRARY_PATH` injection**:
+  - Replaced the unconditional `/usr/lib64/openmpi/lib:/usr/lib/openmpi/lib:` prepend in `src/core/hpc/gdb/GdbRankCoordinator.cpp` with `GdbRankCoordinator::resolveMpiLdLibraryPath(...)`: user MPI stacks (`MPI_ROOT`, `I_MPI_ROOT`, `MPICH_DIR`, `OPENMPI_DIR`, `CRAY_MPICH_DIR`, existing `LD_LIBRARY_PATH` entries containing `mpi`/`spack`, or non-system `mpirun`/`mpiexec` paths) are preserved untouched, and existing system OpenMPI directories are appended (never prepended) only when system OpenMPI is active.
 - [ ] **Make MPI launcher flags implementation-aware (`OpenMPI` vs. `MPICH` / `Intel MPI` / `srun`)**:
   - `src/core/hpc/gdb/GdbRankCoordinator.cpp:523-525` and `src/ui/dialogs/project/ProjectWizard.cpp:136-186` hardcode OpenMPI flags (`--oversubscribe`, `--hostfile`, `--map-by node`, `--tag-output`). Detect launcher family (`mpirun --version`) or expose a launcher preset (`OpenMPI`, `MPICH / Intel MPI`, `Custom`) so `-f` / `-ppn` / `-l` are emitted for Hydra/Intel MPI and users have a raw-flags escape hatch.
 - [ ] **Relocate or gate MPMD FIFO temp directories and add crash cleanup**:
   - `src/core/hpc/gdb/GdbRankCoordinator.cpp:521` places rank FIFOs in node-local `/tmp/gridlock_mi_<pid>_<seq>`, which fails if `mpiexec` spawns ranks on remote hosts via `--hostfile`. On startup, sweep stale `/tmp/gridlock_mi_*` directories whose owning PID is no longer alive; for multi-node launches, steer users to `gdbserver --multi` / `LocalSlurmBackend` rather than local FIFOs.
   - Document and optionally expose a clean-environment helper for HPC fabric IPC remnants (e.g., `/dev/shm/psm3_shm.*`, `FI_PROVIDER=tcp` fallback) when MPI jobs abort abnormally.
-- [ ] **Harden `LocalSlurmBackend` & `DapCoordinator` teardown**:
-  - `src/core/hpc/system/LocalSlurmBackend.cpp:77-88` (`~LocalSlurmBackend`) stops local child processes and the SSH tunnel, but does not cancel `m_activeJobId` if destruction occurs without an explicit `cancelActiveJob()` call. Add a bounded non-blocking `scancel` dispatch (or `QProcess::startDetached(scancelExe, {QString::number(id)})`) on destructor exit when `m_activeJobId > 0`, and prune staged files in `.gridlock/slurm_staging/` once a job terminates.
-  - `src/core/hpc/system/LocalSlurmBackend.cpp:648-660`: probe free ephemeral local ports (using `QTcpServer` bind-to-0 checks) for SSH `-L 127.0.0.1:<local>:<remote>` forwards instead of assuming `effBasePort + r` is locally free on shared login nodes.
-  - `src/core/hpc/dap/DapCoordinator.cpp:171`: replace synchronous blocking `QProcess::execute("scancel", ...)` with an asynchronous `QProcess` or `startDetached` so slow Slurm controllers never freeze the UI thread.
+- [x] **Make `DapCoordinator` and `LocalSlurmBackend` destructor Slurm cancellation non-blocking**:
+  - Replaced blocking `QProcess::execute("scancel", ...)` in `src/core/hpc/dap/DapCoordinator.cpp` with `DapCoordinator::cancelSlurmJobDetached(...)` (`QProcess::startDetached`), and updated `LocalSlurmBackend::~LocalSlurmBackend()` in `src/core/hpc/system/LocalSlurmBackend.cpp` to dispatch detached `scancel` when `m_activeJobId > 0` on destructor teardown.
+- [ ] **Remaining `LocalSlurmBackend` staging cleanup & SSH port probing**:
+  - Prune staged files in `.gridlock/slurm_staging/` once a job terminates, and probe free ephemeral local ports (`QTcpServer` bind-to-0) for SSH `-L 127.0.0.1:<local>:<remote>` forwards (`src/core/hpc/system/LocalSlurmBackend.cpp:648-660`) instead of assuming `effBasePort + r` is locally free on shared login nodes.
 
 ### 3.3 LSP / DAP & External Tool Integration
 

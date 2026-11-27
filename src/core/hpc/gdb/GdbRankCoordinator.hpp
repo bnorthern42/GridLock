@@ -48,6 +48,12 @@ class GdbRankCoordinator : public IBackendCoordinator {
   bool attachToRemoteTargets(const QList<RemoteTargetSpec>& targets);
   QString activeEngineName() const override { return QStringLiteral("gdb"); }
   bool validateLaunchEnvironment(int ranks, QString* outError = nullptr) const override;
+  static QString resolveMpiLdLibraryPath(
+      const QProcessEnvironment& env,
+      const QString& mpiBinPath,
+      const QStringList& systemOpenMpiLibCandidates = {
+          QStringLiteral("/usr/lib64/openmpi/lib"),
+          QStringLiteral("/usr/lib/openmpi/lib")});
 
   void writeMemory(int rankId, uint64_t address, const QByteArray& data) override {
     if (!data.isEmpty())

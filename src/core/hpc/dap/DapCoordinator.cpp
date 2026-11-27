@@ -164,11 +164,21 @@ void DapCoordinator::writeToAdapter(const QByteArray& data) {
 /** @brief Cancels any active SLURM allocation, sends DAP `disconnect`, and stops the adapter. */
 void DapCoordinator::terminateSession() { stopSession(m_shuttingDown); }
 
+bool DapCoordinator::cancelSlurmJobDetached(int jobId, const QString& scancelExecutable) {
+  if (jobId <= 0) return false;
+  const QString exe = scancelExecutable.trimmed().isEmpty() ? QStringLiteral("scancel") : scancelExecutable.trimmed();
+  const bool started = QProcess::startDetached(exe, {QString::number(jobId)});
+  if (!started) {
+    qWarning() << "[DAP] Failed to start detached scancel for Slurm job" << jobId << "using" << exe;
+  }
+  return started;
+}
+
 void DapCoordinator::stopSession(bool silentShutdown) {
   m_shuttingDown = true;
   m_state = SessionState::Terminating;
   if (!silentShutdown) emit stateChanged(m_state);
-  if (m_slurmJobId != -1) QProcess::execute("scancel", {QString::number(m_slurmJobId)});
+  if (m_slurmJobId > 0) (void)cancelSlurmJobDetached(m_slurmJobId);
   const bool hadRunningAdapter = m_process && m_process->state() != QProcess::NotRunning;
   if (m_process) m_process->disconnect();
   if (isAdapterRunning()) sendRequest("disconnect", QJsonObject{{"terminateDebuggee", true}});

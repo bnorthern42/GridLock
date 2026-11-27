@@ -409,6 +409,36 @@ void GdbRankCoordinator::stopAll(bool silentShutdown) {
   }
 }
 
+QString GdbRankCoordinator::resolveMpiLdLibraryPath(const QProcessEnvironment& env,
+                                                    const QString& mpiBinPath,
+                                                    const QStringList& systemOpenMpiLibCandidates) {
+  const QString existingLd = env.value(QStringLiteral("LD_LIBRARY_PATH"));
+  for (const char* varName : {"MPI_ROOT", "I_MPI_ROOT", "MPICH_DIR", "OPENMPI_DIR", "CRAY_MPICH_DIR"}) {
+    if (!env.value(QLatin1String(varName)).trimmed().isEmpty()) return existingLd;
+  }
+  const QString lowerLd = existingLd.toLower();
+  if (lowerLd.contains(QLatin1String("mpi")) || lowerLd.contains(QLatin1String("spack"))) {
+    return existingLd;
+  }
+  const QString cleanBin = mpiBinPath.trimmed();
+  if (cleanBin.isEmpty()) return existingLd;
+  const QString lowerBin = cleanBin.toLower();
+  const bool isSystemOpenMpi =
+      lowerBin.startsWith(QLatin1String("/usr/lib64/openmpi/")) ||
+      lowerBin.startsWith(QLatin1String("/usr/lib/openmpi/")) ||
+      (lowerBin == QLatin1String("/usr/bin/mpirun") || lowerBin == QLatin1String("/usr/bin/mpiexec"));
+  if (!isSystemOpenMpi) return existingLd;
+
+  QStringList parts = existingLd.split(QLatin1Char(':'), Qt::SkipEmptyParts);
+  for (const QString& cand : systemOpenMpiLibCandidates) {
+    const QString trimmedCand = cand.trimmed();
+    if (!trimmedCand.isEmpty() && QDir(trimmedCand).exists() && !parts.contains(trimmedCand)) {
+      parts.append(trimmedCand);
+    }
+  }
+  return parts.join(QLatin1Char(':'));
+}
+
 void GdbRankCoordinator::launchParallelSession(const QString& executable, int explicitRankCount, const QString& customMpiArgs) {
   terminateAllSessions();
   if (executable.trimmed().isEmpty()) return;
@@ -438,7 +468,9 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
 
   QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
   env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
-  env.insert(QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("/usr/lib64/openmpi/lib:/usr/lib/openmpi/lib:") + env.value(QStringLiteral("LD_LIBRARY_PATH")));
+  if (const QString resolvedLd = resolveMpiLdLibraryPath(env, mpiBin); !resolvedLd.isEmpty()) {
+    env.insert(QStringLiteral("LD_LIBRARY_PATH"), resolvedLd);
+  }
   applyResolvedGdbEnv(&env, resolvedGdb);
   for (const QString& pair : hs.envVars.split(QLatin1Char('\n'), Qt::SkipEmptyParts))
     if (const int eq = pair.indexOf(QLatin1Char('=')); eq > 0) env.insert(pair.left(eq).trimmed(), pair.mid(eq + 1).trimmed());

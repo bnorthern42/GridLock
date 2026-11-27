@@ -228,5 +228,8 @@ private slots:
 
     /** @brief Verifies GdbMiParser handles GDB 14+ nested-brace locals, multi-arg *stopped frames, watch changelists, and truncated MI input. */
     void testGdbMiNestedBraceLocalsAndStoppedFrame();
+
+    /** @brief Verifies GdbRankCoordinator::resolveMpiLdLibraryPath preserves user MPI stacks and LocalSlurmBackend destructor cancels active jobs non-blockingly. */
+    void testMpiLdLibraryPathAndSlurmDestructorCancel();
 };
 

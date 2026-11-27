@@ -8,6 +8,7 @@
 #include "../../managers/ConfigManager.hpp"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -77,6 +78,19 @@ LocalSlurmBackend::LocalSlurmBackend(QObject* parent)
 LocalSlurmBackend::~LocalSlurmBackend() {
   if (m_pollTimer) m_pollTimer->stop();
   stopSshTunnel();
+  if (m_activeJobId > 0) {
+    const int activeId = m_activeJobId;
+    m_activeJobId = -1;
+    const auto sl = ConfigManager::instance().getSlurmSettings();
+    QString sibDir = m_activeSiblingBinDir;
+    if (sibDir.isEmpty() && sl.sbatchPath.contains(QLatin1Char('/'))) {
+      sibDir = QFileInfo(sl.sbatchPath.trimmed()).absolutePath();
+    }
+    const QString scancelExe = resolveSlurmExecutable(QStringLiteral("scancel"), QStringLiteral("scancel"), sibDir);
+    if (!scancelExe.isEmpty() && !QProcess::startDetached(scancelExe, {QString::number(activeId)})) {
+      qWarning() << "[Slurm] Destructor failed to start detached scancel for job" << activeId;
+    }
+  }
   for (QProcess* childProc : findChildren<QProcess*>()) {
     if (childProc && childProc->state() != QProcess::NotRunning) {
       if (!childProc->waitForFinished(250)) {

@@ -33,4 +33,9 @@ private slots:
      * @brief Verifies thread-to-rank index mapping when broadcasting stop events.
      */
     void testRankStateBroadcasting();
+
+    /**
+     * @brief Verifies non-blocking detached scancel guards invalid job IDs and dispatches asynchronously.
+     */
+    void testDetachedSlurmCancel();
 };

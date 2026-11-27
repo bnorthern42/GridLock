@@ -83,6 +83,9 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Disconnects adapter signals and terminates the DAP session (`silentShutdown` suppresses UI reset signals). */
   void stopSession(bool silentShutdown = false);
 
+  /** @brief Dispatches a non-blocking detached `scancel <jobId>` without stalling the GUI thread. */
+  static bool cancelSlurmJobDetached(int jobId, const QString& scancelExecutable = QStringLiteral("scancel"));
+
   /** @brief Toggles a source-line breakpoint in @p file at @p line and syncs via `setBreakpoints`. */
   void toggleBreakpoint(const QString& file, int line);
 

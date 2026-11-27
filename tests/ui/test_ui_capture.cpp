@@ -7,8 +7,12 @@
  */
 
 #include "test_ui.hpp"
+#include "../../src/core/hpc/gdb/GdbRankCoordinator.hpp"
+#include "../../src/core/hpc/system/LocalSlurmBackend.hpp"
+#include "../../src/core/managers/ConfigManager.hpp"
 
 #include <QApplication>
+#include <QProcessEnvironment>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -577,4 +581,63 @@ void TestMainWindowUI::testProjectFilesFuzzySearch() {
     filterEdit->setText(QStringLiteral("mpinit"));
     QApplication::processEvents();
     QCOMPARE(explorer.symbolCount(), 1);
+}
+
+void TestMainWindowUI::testMpiLdLibraryPathAndSlurmDestructorCancel() {
+    QTemporaryDir tmpDir;
+    QVERIFY(tmpDir.isValid());
+    const QString fakeOmpiLib = tmpDir.filePath(QStringLiteral("ompi_lib"));
+    const QString missingLib = tmpDir.filePath(QStringLiteral("missing_ompi"));
+    QVERIFY(QDir().mkpath(fakeOmpiLib));
+    const QStringList candidates = {missingLib, fakeOmpiLib};
+
+    // 1. Preserve Spack / MPICH / Intel MPI environments and custom mpirun paths untouched.
+    QProcessEnvironment spackEnv;
+    spackEnv.insert(QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("/opt/spack/mpich/lib:/usr/local/lib"));
+    QCOMPARE(gridlock::GdbRankCoordinator::resolveMpiLdLibraryPath(spackEnv, QStringLiteral("/usr/lib64/openmpi/bin/mpirun"), candidates),
+             QStringLiteral("/opt/spack/mpich/lib:/usr/local/lib"));
+    QProcessEnvironment intelEnv;
+    intelEnv.insert(QStringLiteral("I_MPI_ROOT"), QStringLiteral("/opt/intel/oneapi/mpi/latest"));
+    intelEnv.insert(QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("/custom/app/lib"));
+    QCOMPARE(gridlock::GdbRankCoordinator::resolveMpiLdLibraryPath(intelEnv, QStringLiteral("/usr/lib64/openmpi/bin/mpirun"), candidates),
+             QStringLiteral("/custom/app/lib"));
+    QProcessEnvironment customBinEnv;
+    customBinEnv.insert(QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("/custom/lib"));
+    QCOMPARE(gridlock::GdbRankCoordinator::resolveMpiLdLibraryPath(customBinEnv, QStringLiteral("/opt/mpich/bin/mpiexec"), candidates),
+             QStringLiteral("/custom/lib"));
+
+    // 2. Append (never prepend) only existing system OpenMPI dirs when system OpenMPI is active.
+    QCOMPARE(gridlock::GdbRankCoordinator::resolveMpiLdLibraryPath(customBinEnv, QStringLiteral("/usr/lib64/openmpi/bin/mpirun"), candidates),
+             QStringLiteral("/custom/lib:") + fakeOmpiLib);
+    QCOMPARE(gridlock::GdbRankCoordinator::resolveMpiLdLibraryPath(QProcessEnvironment(), QStringLiteral("/usr/lib/openmpi/bin/mpiexec"), candidates),
+             fakeOmpiLib);
+
+    // 3. LocalSlurmBackend destructor cancels an active job via detached scancel if cancelActiveJob() was not called.
+    const QString scancelLog = tmpDir.filePath(QStringLiteral("dtor_scancel.log"));
+    auto mkShim = [&](const QString& name, const QString& body) {
+        QFile f(tmpDir.filePath(name));
+        const bool ok = f.open(QIODevice::WriteOnly | QIODevice::Text) && f.write(body.toUtf8()) >= 0;
+        f.close();
+        return ok && QFile::setPermissions(tmpDir.filePath(name), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    };
+    QVERIFY(mkShim(QStringLiteral("sbatch"), QStringLiteral("#!/bin/sh\necho \"99412\"\n")));
+    QVERIFY(mkShim(QStringLiteral("squeue"), QStringLiteral("#!/bin/sh\necho \"PENDING\"\n")));
+    QVERIFY(mkShim(QStringLiteral("scancel"), QStringLiteral("#!/bin/sh\necho \"$1\" > \"%1\"\n").arg(scancelLog)));
+    const auto prevSlurm = gridlock::core::ConfigManager::instance().getSlurmSettings();
+    auto testSlurm = prevSlurm;
+    testSlurm.sbatchPath = tmpDir.filePath(QStringLiteral("sbatch"));
+    testSlurm.squeuePath = tmpDir.filePath(QStringLiteral("squeue"));
+    gridlock::core::ConfigManager::instance().saveSlurmSettings(testSlurm);
+    {
+        gridlock::core::LocalSlurmBackend backend;
+        backend.setStagingDirectory(tmpDir.path());
+        backend.setPollIntervalMs(60000);
+        backend.submitDebugJob(QStringLiteral("#!/bin/bash\n#SBATCH --nodes=1\n#SBATCH --ntasks=1\n{BINARY}\n"), QStringLiteral("/bin/true"));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.activeJobId(), 99412, 3000);
+    }
+    gridlock::core::ConfigManager::instance().saveSlurmSettings(prevSlurm);
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
+        QFile lf(scancelLog);
+        return lf.open(QIODevice::ReadOnly | QIODevice::Text) && QString::fromUtf8(lf.readAll()).trimmed() == QStringLiteral("99412");
+    })(), 3000);
 }

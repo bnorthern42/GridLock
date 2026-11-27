@@ -9,9 +9,11 @@
 #include "test_dap_lifecycle.hpp"
 
 #include <QByteArray>
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 
 #include "../../src/core/hpc/dap/DapCoordinator.hpp"
 
@@ -150,6 +152,28 @@ void TestDapLifecycle::testRankStateBroadcasting() {
     QCOMPARE(spy.count(), 1);
     QCOMPARE(spy.first().at(0).toInt(), 3); // Rank 3
     QCOMPARE(spy.first().at(1).toString(), QString("step"));
+}
+
+void TestDapLifecycle::testDetachedSlurmCancel() {
+    QVERIFY(!DapCoordinator::cancelSlurmJobDetached(-1));
+    QVERIFY(!DapCoordinator::cancelSlurmJobDetached(0));
+
+    QTemporaryDir tmpDir;
+    QVERIFY(tmpDir.isValid());
+    const QString logFile = tmpDir.filePath(QStringLiteral("scancel_detached.log"));
+    const QString fakeScancel = tmpDir.filePath(QStringLiteral("scancel"));
+    {
+        QFile f(fakeScancel);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        f.write(QStringLiteral("#!/bin/sh\necho \"$1\" > \"%1\"\n").arg(logFile).toUtf8());
+        f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    }
+    QVERIFY(DapCoordinator::cancelSlurmJobDetached(88123, fakeScancel));
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
+        QFile lf(logFile);
+        return lf.open(QIODevice::ReadOnly | QIODevice::Text) &&
+               QString::fromUtf8(lf.readAll()).trimmed() == QStringLiteral("88123");
+    })(), 3000);
 }
 
 QTEST_GUILESS_MAIN(TestDapLifecycle)
