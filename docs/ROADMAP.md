@@ -97,6 +97,10 @@ For capabilities shipped through **`v0.9.1`** (including the frozen C99 Plugin A
   - [ ] `pahole`-style struct byte-map showing field offsets, bitfields, vptr slots, compiler padding holes, wasted byte percentage, field packing preview, 64-byte cache-line boundaries for OpenMP false-sharing analysis, and live `(StructType*)0x...` typed overlays in `MemView`.
 - [ ] **Annotated Stack Frame Memory and Pointer-Telescoping Inspector** *(core or ABI `v1.0` plugin)*:
   - [ ] Aligned 8-byte stack slot table (`[RSP .. RBP .. Caller CFA]`) highlighting saved `RIP`, `RBP` chains, stack canaries, DWARF stack locals, and 4-hop pointer telescoping (`stack -> heap -> .rodata` symbol/string resolution).
+- [ ] **Odin & Zig (Experimental / Community-Driven)**:
+  - Both **Odin** (`odin build . -debug`) and **Zig** (`zig build -Doptimize=Debug -fllvm`) emit standard DWARF debug info and work with GridLock's GDB/MI backend for core debugging (breakpoints, stepping, stack frames, and scalar inspection).
+  - [ ] First-class slice, string, and dynamic container unpacking (`[]T`, `[dynamic]T`, `std.ArrayList`) is feasible and planned on the roadmap.
+  - *Community caveat*: Because both Odin and Zig are still pre-1.0 with evolving compiler backends and DWARF layouts, full feature parity across all compiler versions cannot be guaranteed without community testing, bug reports, and PRs.
 
 ---
 
