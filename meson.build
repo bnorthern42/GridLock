@@ -10,7 +10,21 @@ add_project_arguments('-DGRIDLOCK_BUILDING_HOST', '-Wall', '-Wextra', '-Wpedanti
 qt6 = import('qt6')
 qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets', 'Concurrent', 'Qml', 'Svg'])
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
-qtermwidget_dep = dependency('qtermwidget6')
+qterm_opt = get_option('qtermwidget')
+qtermwidget_deps = []
+have_qtermwidget6 = false
+if not qterm_opt.disabled()
+  qtermwidget_dep = dependency('qtermwidget6', required: false)
+  if not qtermwidget_dep.found()
+    qtermwidget_dep = dependency('qtermwidget-qt6', required: qterm_opt)
+  endif
+  if qtermwidget_dep.found()
+    qtermwidget_deps = [qtermwidget_dep]
+    have_qtermwidget6 = true
+  endif
+endif
+add_project_arguments(have_qtermwidget6 ? '-DHAVE_QTERMWIDGET6=1' : '-DHAVE_QTERMWIDGET6=0', language: 'cpp')
+summary({'Terminal backend': have_qtermwidget6 ? 'qtermwidget6 (PTY)' : 'Qt6 built-in fallback'}, section: 'Features')
 acss_dep = dependency('QtAdvancedStylesheets', method: 'cmake', modules: 'QtAdvancedStylesheets::qtadvancedcss', required: false)
 if not acss_dep.found()
   cpp = meson.get_compiler('cpp')
@@ -125,7 +139,7 @@ executable('gridlock',
   processed_qt_files,
   compiled_resources,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep, qtermwidget_dep],
+  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep] + qtermwidget_deps,
   build_rpath : '$ORIGIN/../lib:' + meson.current_source_dir() + '/external/Qt-Advanced-Stylesheets/build/lib',
   install_rpath : '$ORIGIN/../lib',
   install : true)
@@ -307,7 +321,7 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
     '-DGRIDLOCK_TEST_DUMMY_PLUGIN_SRC="' + meson.current_source_dir() + '/tests/core/test_dummy_plugin.c"',
     '-DGRIDLOCK_TEST_INCLUDE_DIR="' + meson.current_source_dir() + '/include"'
   ],
-  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep, qtermwidget_dep],
+  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep] + qtermwidget_deps,
   build_by_default : false
 )
 

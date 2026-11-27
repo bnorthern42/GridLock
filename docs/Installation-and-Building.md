@@ -33,7 +33,7 @@ chmod +x GridLock-0.9.1-Tutorials-x86_64.AppImage
 
 ## 2. System Dependencies for Source Builds
 
-GridLock requires a C++23 compiler (`GCC 13+`, `Clang 17+`, or Intel oneAPI `icpx 2024+`), `Meson >= 1.3.0`, `Ninja`, `CMake` (when building `Qt-Advanced-Stylesheets` or `qtermwidget6`), `Qt6` (`Core`, `Gui`, `Widgets`, `Network`, `Sql`, `Concurrent`, `Svg`, `OpenGLWidgets`, `Qml`, `Test`), `qtermwidget6`, `tomlplusplus` (auto-fetched via `external/tomlplusplus.wrap` if absent), and an MPI implementation (`OpenMPI` or `MPICH`).
+GridLock requires a C++23 compiler (`GCC 13+`, `Clang 17+`, or Intel oneAPI `icpx 2024+`), `Meson >= 1.3.0`, `Ninja`, `CMake` (when building `Qt-Advanced-Stylesheets`), `Qt6` (`Core`, `Gui`, `Widgets`, `Network`, `Sql`, `Concurrent`, `Svg`, `OpenGLWidgets`, `Qml`, `Test`), `tomlplusplus` (auto-fetched via `external/tomlplusplus.wrap` if absent), and an MPI implementation (`OpenMPI` or `MPICH`). **`qtermwidget6`** is optional (`-Dqtermwidget=auto`): if unavailable (for example on HPC clusters), GridLock falls back automatically to its built-in Qt6 terminal widget.
 
 ### Arch Linux (`pacman`)
 

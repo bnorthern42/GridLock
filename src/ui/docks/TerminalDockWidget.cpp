@@ -2,8 +2,9 @@
  * @file TerminalDockWidget.cpp
  * @brief Implementation of the embedded terminal emulator dock widget.
  *
- * Implements shell initialization, VT100 typography management, delayed font
- * application, and terminal color scheme bindings wrapping QTermWidget.
+ * Implements shell initialization, monospace typography management, color scheme
+ * bindings, and copy/paste/clear ergonomics using QTermWidget when HAVE_QTERMWIDGET6 == 1
+ * or a built-in Qt6 QPlainTextEdit + QProcess fallback terminal when HAVE_QTERMWIDGET6 == 0.
  */
 
 #include "TerminalDockWidget.hpp"
@@ -26,24 +27,24 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMimeData>
+#include <QPlainTextEdit>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QRegularExpression>
+#include <QScrollBar>
 #include <QSizePolicy>
+#include <QTextCursor>
 #include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <csignal>
 #include <sys/wait.h>
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
 #include <qtermwidget.h>
+#endif
 
 namespace gridlock::ui {
 
-/**
- * @brief Resolves a strict fixed-pitch monospace font, falling back to guaranteed system monospace fonts.
- * @param family Candidate font family name.
- * @param pointSize Desired point size.
- * @return Validated fixed-pitch QFont instance.
- */
 static QFont resolveMonospaceFont(const QString& family, int pointSize) {
     QFont font(family, pointSize);
     font.setFixedPitch(true); font.setStyleHint(QFont::Monospace);
@@ -63,50 +64,126 @@ static QFont resolveMonospaceFont(const QString& family, int pointSize) {
     return font;
 }
 
-/**
- * @brief Constructs the terminal widget, launches shell, and configures environment.
- * @param title Dock window title string.
- * @param parent Optional parent widget.
- */
+#if !(defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6)
+static QString stripAnsiEscapeSequences(QString text) {
+    static const QRegularExpression oscRe(QStringLiteral("\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)"));
+    static const QRegularExpression csiRe(QStringLiteral("\\x1b\\[[0-9;?]*[ -/]*[@-~]"));
+    static const QRegularExpression singleEscRe(QStringLiteral("\\x1b[@-Z\\\\-_]"));
+    text.remove(oscRe);
+    text.remove(csiRe);
+    text.remove(singleEscRe);
+    text.remove(QLatin1Char('\r'));
+    return text;
+}
+#endif
+
 TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent) : QWidget(parent) {
     Q_UNUSED(title);
-    // Layout without interior padding for edge-to-edge terminal display.
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(0);
 
-    // Instantiate QTermWidget backend without starting shell process yet.
+    const auto ts = gridlock::core::ConfigManager::instance().getTerminalSettings();
+    m_activeFont = resolveMonospaceFont(ts.fontFamily, ts.fontSize);
+
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     m_termWidget = new QTermWidget(0, this);
     m_termWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_termWidget->setStyleSheet(QStringLiteral(
         "QTermWidget, QTermWidget QWidget { padding: 0px; margin: 0px; border: none; font-family: monospace; }"));
-
-    const auto ts = gridlock::core::ConfigManager::instance().getTerminalSettings();
     m_termWidget->setShellProgram(ts.shellPath);
-
-    // Set default standard terminal environment parameters.
     setEnvironment({QStringLiteral("TERM=xterm-256color"), QStringLiteral("COLORTERM=truecolor")});
     setColorScheme(QStringLiteral("DarkPastels"));
     m_termWidget->startShellProgram();
 
-    m_activeFont = resolveMonospaceFont(ts.fontFamily, ts.fontSize);
     setContextMenuPolicy(Qt::CustomContextMenu);
     m_termWidget->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(this, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) { showTerminalContextMenu(mapToGlobal(pos)); });
     connect(m_termWidget, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) { showTerminalContextMenu(m_termWidget->mapToGlobal(pos)); });
     installEventFilter(this);
     layout->addWidget(m_termWidget, 1);
+#else
+    m_shellProgram = ts.shellPath.trimmed().isEmpty() ? qEnvironmentVariable("SHELL", QStringLiteral("/bin/bash")) : ts.shellPath.trimmed();
+    m_fallbackView = new QPlainTextEdit(this);
+    m_fallbackView->setObjectName(QStringLiteral("fallbackTerminalView"));
+    m_fallbackView->setFrameShape(QFrame::NoFrame);
+    m_fallbackView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_fallbackView->setMaximumBlockCount(m_scrollbackLines);
+    m_fallbackView->setUndoRedoEnabled(false);
+    m_fallbackView->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_fallbackView->installEventFilter(this);
+    if (m_fallbackView->viewport()) m_fallbackView->viewport()->installEventFilter(this);
+
+    setEnvironment({QStringLiteral("TERM=dumb"), QStringLiteral("PAGER=cat")});
+    setColorScheme(QStringLiteral("DarkPastels"));
+    startFallbackShell();
+
+    setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(this, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) { showTerminalContextMenu(mapToGlobal(pos)); });
+    connect(m_fallbackView, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) { showTerminalContextMenu(m_fallbackView->mapToGlobal(pos)); });
+    installEventFilter(this);
+    layout->addWidget(m_fallbackView, 1);
+    enforceMonospaceOnChildren();
+#endif
 }
 
-/** @brief Disconnects QTermWidget signals and terminates the PTY shell process before child destruction. */
 TerminalDockWidget::~TerminalDockWidget() {
     removeEventFilter(this);
     shutdownTerminalSession();
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     delete m_termWidget; m_termWidget = nullptr;
+#else
+    delete m_fallbackShell; m_fallbackShell = nullptr;
+    delete m_fallbackView; m_fallbackView = nullptr;
+#endif
 }
 
+#if !(defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6)
+void TerminalDockWidget::startFallbackShell() {
+    if (m_fallbackShell && m_fallbackShell->state() != QProcess::NotRunning) return;
+    delete m_fallbackShell;
+    m_fallbackShell = new QProcess(this);
+    m_fallbackShell->setProcessChannelMode(QProcess::MergedChannels);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    for (const QString& pair : m_environment) {
+        if (const int eq = pair.indexOf(QLatin1Char('=')); eq > 0) {
+            env.insert(pair.left(eq), pair.mid(eq + 1));
+        }
+    }
+    m_fallbackShell->setProcessEnvironment(env);
+    if (!m_currentWorkingDir.isEmpty() && QDir(m_currentWorkingDir).exists()) {
+        m_fallbackShell->setWorkingDirectory(m_currentWorkingDir);
+    }
+    connect(m_fallbackShell, &QProcess::readyReadStandardOutput, this, [this]() {
+        if (m_fallbackShell) appendFallbackOutput(m_fallbackShell->readAllStandardOutput());
+    });
+    const QString exe = (!m_shellProgram.isEmpty() && QFileInfo::exists(m_shellProgram))
+                            ? m_shellProgram
+                            : QStringLiteral("/bin/bash");
+    m_fallbackShell->start(exe, {});
+    m_fallbackShell->waitForStarted(1500);
+}
+
+void TerminalDockWidget::appendFallbackOutput(const QByteArray& rawBytes) {
+    if (!m_fallbackView || rawBytes.isEmpty()) return;
+    const QString cleaned = stripAnsiEscapeSequences(QString::fromUtf8(rawBytes));
+    if (cleaned.isEmpty()) return;
+    QTextCursor cur = m_fallbackView->textCursor();
+    cur.movePosition(QTextCursor::End);
+    cur.insertText(cleaned);
+    m_inputStartPos = cur.position();
+    m_fallbackView->setTextCursor(cur);
+    if (QScrollBar* sb = m_fallbackView->verticalScrollBar()) sb->setValue(sb->maximum());
+}
+#endif
+
 int TerminalDockWidget::shellPid() const {
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     if (!m_termWidget) return 0;
     const int pid = m_termWidget->getShellPID();
+#else
+    if (!m_fallbackShell || m_fallbackShell->state() == QProcess::NotRunning) return 0;
+    const int pid = static_cast<int>(m_fallbackShell->processId());
+#endif
     if (pid <= 0 || ::kill(pid, 0) != 0) return 0;
     QFile statusFile(QStringLiteral("/proc/%1/status").arg(pid));
     if (statusFile.open(QIODevice::ReadOnly) && statusFile.readAll().contains("State:\tZ")) return 0;
@@ -114,6 +191,7 @@ int TerminalDockWidget::shellPid() const {
 }
 
 void TerminalDockWidget::shutdownTerminalSession() {
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     if (!m_termWidget) return;
     m_termWidget->disconnect(this);
     for (QObject* child : m_termWidget->findChildren<QObject*>()) if (child) child->disconnect(this);
@@ -131,13 +209,34 @@ void TerminalDockWidget::shutdownTerminalSession() {
         if (pid > 0) { int st = 0; ::waitpid(pid, &st, WNOHANG); }
     }
     m_termWidget->blockSignals(true);
+#else
+    if (!m_fallbackShell) return;
+    m_fallbackShell->disconnect(this);
+    if (m_fallbackShell->state() != QProcess::NotRunning) {
+        m_fallbackShell->write("exit\n");
+        m_fallbackShell->closeWriteChannel();
+        if (!m_fallbackShell->waitForFinished(150)) {
+            m_fallbackShell->terminate();
+            if (!m_fallbackShell->waitForFinished(150)) {
+                m_fallbackShell->kill();
+                m_fallbackShell->waitForFinished(150);
+            }
+        }
+    }
+    m_fallbackShell->blockSignals(true);
+#endif
 }
 
 bool TerminalDockWidget::hasSelection() const {
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     return m_termWidget && !m_termWidget->selectedText(true).isEmpty();
+#else
+    return m_fallbackView && m_fallbackView->textCursor().hasSelection();
+#endif
 }
 
 void TerminalDockWidget::copySelection() {
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     if (!m_termWidget) return;
     const QString sel = m_termWidget->selectedText(true);
     if (sel.isEmpty()) return;
@@ -145,36 +244,60 @@ void TerminalDockWidget::copySelection() {
     if (QClipboard* cb = QGuiApplication::clipboard()) {
         if (cb->text() != sel) cb->setText(sel);
     }
+#else
+    if (!m_fallbackView || !m_fallbackView->textCursor().hasSelection()) return;
+    m_fallbackView->copy();
+#endif
 }
 
 void TerminalDockWidget::pasteFromClipboard() {
-    if (!m_termWidget) return;
     QClipboard* cb = QGuiApplication::clipboard();
     const QString clip = cb ? cb->text() : QString();
     if (clip.isEmpty()) return;
     m_lastPastedText = clip;
     ensureShellStarted();
-    m_termWidget->pasteClipboard();
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
+    if (m_termWidget) m_termWidget->pasteClipboard();
+#else
+    if (m_fallbackView) {
+        QTextCursor cur = m_fallbackView->textCursor();
+        cur.movePosition(QTextCursor::End);
+        cur.insertText(clip);
+        m_fallbackView->setTextCursor(cur);
+    }
+#endif
 }
 
 void TerminalDockWidget::selectAllText() {
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     if (!m_termWidget) return;
     const int totalRows = std::max(0, m_termWidget->historyLinesCount() + m_termWidget->screenLinesCount() - 1);
     const int cols = std::max(0, m_termWidget->screenColumnsCount());
     m_termWidget->setSelectionStart(0, 0);
     m_termWidget->setSelectionEnd(totalRows, cols);
+#else
+    if (m_fallbackView) m_fallbackView->selectAll();
+#endif
 }
 
 void TerminalDockWidget::clearTerminal() {
+    m_lastClearSentFormFeed = false;
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     if (!m_termWidget) return;
     m_termWidget->clear();
     ensureShellStarted();
-    m_lastClearSentFormFeed = false;
-    if (shellPid() > 0) {
-        // Send a clean newline (never Ctrl+L / \x0c) so zsh/bash prints a fresh prompt without triggering ZLE expansion widgets.
-        m_termWidget->sendText(QStringLiteral("\n"));
-    }
+    if (shellPid() > 0) m_termWidget->sendText(QStringLiteral("\n"));
     m_termWidget->setFocus(Qt::OtherFocusReason);
+#else
+    if (!m_fallbackView) return;
+    m_fallbackView->clear();
+    m_inputStartPos = 0;
+    ensureShellStarted();
+    if (m_fallbackShell && m_fallbackShell->state() == QProcess::Running) {
+        m_fallbackShell->write("\n");
+    }
+    m_fallbackView->setFocus(Qt::OtherFocusReason);
+#endif
 }
 
 QMenu* TerminalDockWidget::createContextMenu(QWidget* parent) {
@@ -237,9 +360,15 @@ void TerminalDockWidget::showTerminalContextMenu(const QPoint& globalPos) {
 }
 
 void TerminalDockWidget::ensureShellStarted() {
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     if (m_shellStarted || !m_termWidget) return;
     m_shellStarted = true;
     enforceMonospaceOnChildren();
+#else
+    if (!m_fallbackShell || m_fallbackShell->state() == QProcess::NotRunning) startFallbackShell();
+    m_shellStarted = true;
+    enforceMonospaceOnChildren();
+#endif
 }
 
 void TerminalDockWidget::showEvent(QShowEvent* event) {
@@ -247,9 +376,6 @@ void TerminalDockWidget::showEvent(QShowEvent* event) {
     ensureShellStarted();
 }
 
-/**
- * @brief Re-applies validated monospace typography and full-width geometry across QTermWidget and its children.
- */
 void TerminalDockWidget::enforceMonospaceOnChildren() {
     if (!m_activeFont.fixedPitch() && !QFontInfo(m_activeFont).fixedPitch()) {
         m_activeFont = resolveMonospaceFont(QStringLiteral("JetBrains Mono"), 11);
@@ -257,8 +383,8 @@ void TerminalDockWidget::enforceMonospaceOnChildren() {
     m_activeFont.setFixedPitch(true);
     m_activeFont.setStyleHint(QFont::Monospace);
     setFont(m_activeFont);
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     if (!m_termWidget) return;
-
     m_termWidget->installEventFilter(this);
     m_termWidget->setFont(m_activeFont);
     m_termWidget->setTerminalFont(m_activeFont);
@@ -268,7 +394,6 @@ void TerminalDockWidget::enforceMonospaceOnChildren() {
     const int parentH = height() > 24 ? height() : m_termWidget->height();
     if (parentW > 24 && m_termWidget->width() < parentW) m_termWidget->setGeometry(0, 0, parentW, parentH);
 
-    // Lock fixed-pitch font, context-menu policy, and full-width geometry strictly on non-window QTermWidget child widgets.
     for (QWidget* child : m_termWidget->findChildren<QWidget*>()) {
         if (!child || child->isWindow() || qobject_cast<QMenu*>(child)) continue;
         child->installEventFilter(this);
@@ -282,14 +407,17 @@ void TerminalDockWidget::enforceMonospaceOnChildren() {
     }
     m_termWidget->updateGeometry();
     m_termWidget->update();
+#else
+    if (!m_fallbackView) return;
+    m_fallbackView->setFont(m_activeFont);
+    if (m_fallbackView->viewport()) m_fallbackView->viewport()->setFont(m_activeFont);
+    for (QWidget* child : m_fallbackView->findChildren<QWidget*>()) {
+        if (!child || child->isWindow() || qobject_cast<QMenu*>(child)) continue;
+        child->setFont(m_activeFont);
+    }
+#endif
 }
 
-/**
- * @brief Intercepts keyboard copy/paste shortcuts, ShortcutOverride, ContextMenu, and font/geometry events.
- * @param watched Target QObject receiving the event.
- * @param event Event payload.
- * @return True if the event was handled and consumed; otherwise base QWidget::eventFilter result.
- */
 bool TerminalDockWidget::eventFilter(QObject* watched, QEvent* event) {
     if (auto* w = qobject_cast<QWidget*>(watched); w && (qobject_cast<QMenu*>(w) || (w != this && w->isWindow()))) {
         return QWidget::eventFilter(watched, event);
@@ -310,6 +438,27 @@ bool TerminalDockWidget::eventFilter(QObject* watched, QEvent* event) {
                 if (isCtrlShiftC) { copySelection(); ke->accept(); return true; }
                 if (isCtrlShiftV || isShiftInsert || isCtrlV) { pasteFromClipboard(); ke->accept(); return true; }
                 if (isCtrlC && hasSelection()) { copySelection(); ke->accept(); return true; }
+#if !(defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6)
+                if (isCtrlC && !hasSelection() && m_fallbackShell && m_fallbackShell->state() == QProcess::Running) {
+                    const int pid = shellPid();
+                    if (pid > 0) ::kill(pid, SIGINT);
+                    ke->accept();
+                    return true;
+                }
+                if (watched == m_fallbackView && (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) && mods == Qt::NoModifier) {
+                    const QString allText = m_fallbackView->toPlainText();
+                    const int start = qBound(0, m_inputStartPos, allText.size());
+                    const QString cmdLine = allText.mid(start);
+                    QTextCursor cur = m_fallbackView->textCursor();
+                    cur.movePosition(QTextCursor::End);
+                    cur.insertText(QStringLiteral("\n"));
+                    m_inputStartPos = cur.position();
+                    m_fallbackView->setTextCursor(cur);
+                    sendCommand(cmdLine);
+                    ke->accept();
+                    return true;
+                }
+#endif
             }
         } else if (t == QEvent::ContextMenu) {
             auto* ce = static_cast<QContextMenuEvent*>(event);
@@ -335,25 +484,21 @@ bool TerminalDockWidget::eventFilter(QObject* watched, QEvent* event) {
     return QWidget::eventFilter(watched, event);
 }
 
-/**
- * @brief Verifies that QTermWidget and all internal display child widgets retain a fixed-pitch font.
- * @return True if every child widget inside TerminalDockWidget reports fixed-pitch typography.
- */
 bool TerminalDockWidget::areAllChildWidgetsFixedPitch() const {
-    if (!m_termWidget) return m_activeFont.fixedPitch() || QFontInfo(m_activeFont).fixedPitch();
     const_cast<TerminalDockWidget*>(this)->enforceMonospaceOnChildren();
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
+    if (!m_termWidget) return m_activeFont.fixedPitch() || QFontInfo(m_activeFont).fixedPitch();
     for (const QWidget* child : m_termWidget->findChildren<const QWidget*>()) {
         if (!child || child->isWindow() || qobject_cast<const QMenu*>(child)) continue;
         if (!child->font().fixedPitch() && !QFontInfo(child->font()).fixedPitch()) return false;
     }
     return m_termWidget->getTerminalFont().fixedPitch() || QFontInfo(m_termWidget->getTerminalFont()).fixedPitch();
+#else
+    if (!m_fallbackView) return m_activeFont.fixedPitch() || QFontInfo(m_activeFont).fixedPitch();
+    return m_fallbackView->font().fixedPitch() || QFontInfo(m_fallbackView->font()).fixedPitch();
+#endif
 }
 
-/**
- * @brief Configures terminal font family and point size with monospace fallback.
- * @param family Font family name.
- * @param pointSize Point size in points.
- */
 void TerminalDockWidget::setTerminalFont(const QString& family, int pointSize) {
     QFont font(family, pointSize);
     font.setFixedPitch(true); font.setStyleHint(QFont::Monospace);
@@ -361,88 +506,84 @@ void TerminalDockWidget::setTerminalFont(const QString& family, int pointSize) {
     m_applyingFontGuard = true; enforceMonospaceOnChildren(); m_applyingFontGuard = false;
 }
 
-/**
- * @brief Custom font setter validating fixed-pitch metrics before applying.
- * @param family Candidate font family.
- * @param pointSize Font size.
- */
 void TerminalDockWidget::setCustomFont(const QString& family, int pointSize) { setTerminalFont(family, pointSize); }
 
-/**
- * @brief Retrieves the active validated fixed-pitch terminal font.
- * @return Current fixed-pitch QFont instance.
- */
 QFont TerminalDockWidget::activeTerminalFont() const {
     if (m_activeFont.fixedPitch() || QFontInfo(m_activeFont).fixedPitch()) return m_activeFont;
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     return m_termWidget ? m_termWidget->getTerminalFont() : m_activeFont;
+#else
+    return m_fallbackView ? m_fallbackView->font() : m_activeFont;
+#endif
 }
 
-/**
- * @brief Retrieves the active terminal emulator font.
- * @return Current QFont instance.
- */
 QFont TerminalDockWidget::terminalFont() const { return !m_requestedFont.family().isEmpty() ? m_requestedFont : activeTerminalFont(); }
 
-/**
- * @brief Sets the active QTermWidget color scheme.
- * @param scheme Name of color scheme.
- */
-void TerminalDockWidget::setColorScheme(const QString& scheme) { m_colorScheme = scheme; if (m_termWidget) m_termWidget->setColorScheme(scheme); }
+void TerminalDockWidget::setColorScheme(const QString& scheme) {
+    m_colorScheme = scheme;
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
+    if (m_termWidget) m_termWidget->setColorScheme(scheme);
+#else
+    if (m_fallbackView) {
+        const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(
+            gridlock::core::managers::ThemeManager::instance().activeThemeId());
+        m_fallbackView->setStyleSheet(QStringLiteral(
+            "QPlainTextEdit#fallbackTerminalView { background-color: %1; color: %2; border: none; padding: 4px; }")
+                                          .arg(pal.canvasHex, pal.textHex));
+    }
+#endif
+}
 
-/**
- * @brief Retrieves the current color scheme identifier.
- * @return Color scheme name.
- */
 QString TerminalDockWidget::colorScheme() const { return m_colorScheme; }
 
-/**
- * @brief Sets the maximum scrollback buffer history size.
- * @param lines Number of history lines.
- */
-void TerminalDockWidget::setScrollbackLines(int lines) { m_scrollbackLines = lines; if (m_termWidget) m_termWidget->setHistorySize(lines); }
+void TerminalDockWidget::setScrollbackLines(int lines) {
+    m_scrollbackLines = lines;
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
+    if (m_termWidget) m_termWidget->setHistorySize(lines);
+#else
+    if (m_fallbackView) m_fallbackView->setMaximumBlockCount(qMax(100, lines));
+#endif
+}
 
-/**
- * @brief Retrieves the active scrollback history buffer capacity.
- * @return Line count.
- */
-int TerminalDockWidget::scrollbackLines() const { return m_termWidget ? m_termWidget->historySize() : m_scrollbackLines; }
+int TerminalDockWidget::scrollbackLines() const {
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
+    return m_termWidget ? m_termWidget->historySize() : m_scrollbackLines;
+#else
+    return m_scrollbackLines;
+#endif
+}
 
-/**
- * @brief Injects custom environment variable strings into the terminal shell.
- * @param env Array of environment definitions.
- */
-void TerminalDockWidget::setEnvironment(const QStringList& env) { m_environment = env; if (m_termWidget) m_termWidget->setEnvironment(env); }
+void TerminalDockWidget::setEnvironment(const QStringList& env) {
+    m_environment = env;
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
+    if (m_termWidget) m_termWidget->setEnvironment(env);
+#endif
+}
 
-/**
- * @brief Retrieves the environment array configured on the terminal.
- * @return List of environment variable strings.
- */
 QStringList TerminalDockWidget::environment() const { return m_environment; }
 
-/**
- * @brief Dispatches a shell command to the embedded QTermWidget session and appends a newline.
- * @param command Shell command string to execute in the terminal.
- */
 void TerminalDockWidget::sendCommand(const QString& command) {
     m_lastSentCommand = command.trimmed();
     ensureShellStarted();
-    if (m_termWidget != nullptr && !m_lastSentCommand.isEmpty() && m_termWidget->getShellPID() > 0) {
-        if (m_pendingCdSync && !m_currentWorkingDir.isEmpty()) {
-            m_pendingCdSync = false;
-            QString escaped = m_currentWorkingDir;
-            escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
-            m_termWidget->sendText(QStringLiteral("cd -- '%1' && %2\n").arg(escaped, m_lastSentCommand));
-        } else {
-            // Dispatch command text followed by newline to trigger interactive shell execution.
-            m_termWidget->sendText(m_lastSentCommand + QStringLiteral("\n"));
-        }
+    if (m_lastSentCommand.isEmpty()) return;
+    QString payload;
+    if (m_pendingCdSync && !m_currentWorkingDir.isEmpty()) {
+        m_pendingCdSync = false;
+        QString escaped = m_currentWorkingDir;
+        escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+        payload = QStringLiteral("cd -- '%1' && %2\n").arg(escaped, m_lastSentCommand);
+    } else {
+        payload = m_lastSentCommand + QStringLiteral("\n");
     }
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
+    if (m_termWidget != nullptr && m_termWidget->getShellPID() > 0) m_termWidget->sendText(payload);
+#else
+    if (m_fallbackShell && m_fallbackShell->state() == QProcess::Running) {
+        m_fallbackShell->write(payload.toUtf8());
+    }
+#endif
 }
 
-/**
- * @brief Updates the terminal working directory and changes the live PTY shell directory.
- * @param dirPath Target directory (or file path whose parent directory is resolved).
- */
 void TerminalDockWidget::setWorkingDirectory(const QString& dirPath) {
     const QString trimmed = dirPath.trimmed();
     if (trimmed.isEmpty()) return;
@@ -453,15 +594,18 @@ void TerminalDockWidget::setWorkingDirectory(const QString& dirPath) {
     if (canonical.isEmpty() || !QDir(canonical).exists() || canonical == m_currentWorkingDir) return;
     m_currentWorkingDir = canonical;
     m_pendingCdSync = true;
+    QString escaped = m_currentWorkingDir;
+    escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     if (m_termWidget != nullptr) {
         m_termWidget->setWorkingDirectory(m_currentWorkingDir);
-        if (m_termWidget->getShellPID() > 0) {
-            // Escape single quotes for POSIX sh/bash/zsh and switch the live interactive shell directory.
-            QString escaped = m_currentWorkingDir;
-            escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
-            m_termWidget->sendText(QStringLiteral("cd -- '%1'\n").arg(escaped));
-        }
+        if (m_termWidget->getShellPID() > 0) m_termWidget->sendText(QStringLiteral("cd -- '%1'\n").arg(escaped));
     }
+#else
+    if (m_fallbackShell && m_fallbackShell->state() == QProcess::Running) {
+        m_fallbackShell->write(QStringLiteral("cd -- '%1'\n").arg(escaped).toUtf8());
+    }
+#endif
 }
 
 }  // namespace gridlock::ui

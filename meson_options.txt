@@ -1,0 +1,2 @@
+option('qtermwidget', type: 'feature', value: 'auto',
+       description: 'Use external qtermwidget6 for the embedded terminal (falls back to built-in Qt6 terminal if unavailable)')

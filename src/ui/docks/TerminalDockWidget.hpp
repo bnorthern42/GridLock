@@ -16,7 +16,12 @@
 #include <QWidget>
 
 class QMenu;
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
 class QTermWidget;
+#else
+class QPlainTextEdit;
+class QProcess;
+#endif
 
 namespace gridlock::ui {
 
@@ -178,7 +183,16 @@ private:
     /** @brief Displays the themed right-click terminal context menu at @p globalPos. */
     void showTerminalContextMenu(const QPoint& globalPos);
 
+#if defined(HAVE_QTERMWIDGET6) && HAVE_QTERMWIDGET6
     QTermWidget* m_termWidget{nullptr};    ///< Underlying QTermWidget instance.
+#else
+    void appendFallbackOutput(const QByteArray& rawBytes);
+    void startFallbackShell();
+    QPlainTextEdit* m_fallbackView{nullptr}; ///< Built-in Qt6 fallback terminal view.
+    QProcess* m_fallbackShell{nullptr};      ///< Built-in Qt6 fallback shell process.
+    QString m_shellProgram;                  ///< Configured shell executable path.
+    int m_inputStartPos{0};                  ///< Document cursor offset where editable user input begins.
+#endif
     QFont m_requestedFont;                 ///< User-configured terminal font setting.
     QFont m_activeFont;                    ///< Active validated monospace font.
     QString m_colorScheme;                 ///< Active color scheme name.

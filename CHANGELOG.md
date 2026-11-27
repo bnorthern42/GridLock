@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Optional `qtermwidget6` Dependency & Built-In Qt6 Fallback Terminal (`meson_options.txt`, `meson.build`, `TerminalDockWidget`)**:
+  - Added a `qtermwidget` Meson feature option (`auto` by default, checking `qtermwidget6` and `qtermwidget-qt6`) that automatically falls back to a built-in Qt6 `QPlainTextEdit` + `QProcess` interactive shell terminal (`HAVE_QTERMWIDGET6 == 0`) with ANSI stripping, copy/paste/clear support, and monospace enforcement so GridLock compiles cleanly on HPC clusters (such as TACC Stampede3) where `qtermwidget6` development headers are not installed.
+
 ## [0.9.1] - 2026-11-26
 
 ### Added

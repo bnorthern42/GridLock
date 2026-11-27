@@ -38,7 +38,7 @@ chmod +x GridLock-0.9.1-Tutorials-x86_64.AppImage
 **Build Prerequisites:**
 * **Meson `>= 1.3.0`** and **Ninja** (required for `cpp_std=c++23` and Intel `icx`/`icpx` compiler support; on HPC clusters with older system Meson modules, install an up-to-date user-local copy via `python3 -m pip install --user --upgrade "meson>=1.3.0" ninja` and ensure `~/.local/bin` precedes system directories on `PATH`).
 * **C++23-capable compiler**: GCC `13+`, Clang `17+`, or Intel oneAPI `icpx` `2024+`.
-* **Qt 6** (`Qt6Core`, `Qt6Gui`, `Qt6Widgets`, `Qt6Network`, plus `Qt6Sql`, `Qt6OpenGLWidgets`, `Qt6Concurrent`, `Qt6Qml`, `Qt6Svg`, `Qt6Test`), **`qtermwidget6`**, and **`Qt-Advanced-Stylesheets`** (bundled submodule).
+* **Qt 6** (`Qt6Core`, `Qt6Gui`, `Qt6Widgets`, `Qt6Network`, plus `Qt6Sql`, `Qt6OpenGLWidgets`, `Qt6Concurrent`, `Qt6Qml`, `Qt6Svg`, `Qt6Test`) and **`Qt-Advanced-Stylesheets`** (bundled submodule). **`qtermwidget6`** is optional (`-Dqtermwidget=auto`, default): when absent on HPC clusters, GridLock automatically builds with its built-in Qt6 fallback terminal.
 * **GDB `>= 10.0`** (`GDB/MI3`) and an **MPI toolchain** (`OpenMPI` or `MPICH`) on `PATH`.
 
 ```bash
