@@ -3,7 +3,7 @@
 Plugins extend GridLock with custom inspection tools, solver-specific visualizations, custom menus, status-bar indicators, source annotations, and structured report tabs without modifying the core application. You can install plugins directly from Git repositories inside **Preferences -> Plugins**, declare a reproducible plugin list in `plugins.toml`, scaffold a new plugin with [`scripts/init_plugin.lua`](../scripts/init_plugin.lua), or drop pre-built plugin files into your global or project plugin folder.
 
 > [!TIP]
-> Building your own solver or mesh extension? Run `lua scripts/init_plugin.lua` to generate a ready-to-build C++23 or C99 plugin project in seconds, or see [Plugin Authoring, UI Surfaces & Build Recipes](Plugin-Authoring-and-UI-Surfaces.md).
+> Building your own solver or mesh extension? Run `lua scripts/init_plugin.lua` to generate a ready-to-build C++23 or C99 plugin project in seconds, see [Plugin Authoring, UI Surfaces & Build Recipes](Plugin-Authoring-and-UI-Surfaces.md), or read [Why a Versioned C ABI Instead of Lua?](Plugin-Architecture-and-Lifecycle.md#why-a-versioned-c-abi-instead-of-lua) for the architectural rationale behind GridLock's native `gridlock_plugin_init_v1` contract.
 
 ---
 

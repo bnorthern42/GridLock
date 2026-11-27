@@ -9,6 +9,18 @@ See also:
 
 ---
 
+## Why a Versioned C ABI Instead of Lua?
+
+GridLock exposes `gridlock_plugin_init_v1` and `GridLockHostApi` as a frozen, versioned C99 ABI (`include/gridlock/plugin_api.h`) rather than embedding a Lua runtime inside the core debugger executable. This architectural choice is driven by five HPC and systems-engineering constraints:
+
+1. **Direct Native Scientific & HPC Library Access**: Domain plugins routinely link against C, C++, and Fortran scientific libraries such as HDF5, VTK, Eigen, PETSc/MFEM mesh readers, or custom binary/DWARF decoders. A native C ABI lets plugins link those libraries directly with zero FFI marshaling overhead and zero C++ template or ABI name-mangling friction across compiler versions.
+2. **Language Agnosticism**: Any systems or scientific language capable of exporting an `extern "C"` entry point (C, C++, Fortran, Odin, Zig, Go, and others) can build first-class GridLock plugins without fighting an embedded VM binding layer.
+3. **Zero Core Runtime Bloat on HPC Clusters**: Locked-down RHEL, Rocky, and SLES supercomputer environments, Spack software trees, and portable AppImages often ship incompatible Lua versions (Lua 5.1, 5.3, 5.4, or LuaJIT) or omit Lua development headers entirely. Keeping GridLock core free of an embedded scripting VM avoids extra runtime and ABI dependencies on clusters.
+4. **Deterministic Multi-Rank Memory & Hot-Reload Safety**: Inspecting large contiguous arrays and rank memory across dozens or hundreds of MPI ranks benefits from predictable native memory access without VM garbage-collection pauses. Pairing explicit `plugin.map` symbol version scripts (`global: gridlock_plugin_init_v1; local: *;`) with host-owned allocation tracking (`alloc_bytes` / `free_bytes`) enables deterministic `dlclose` / `dlopen` hot-reloading mid-session without restarting the debug job.
+5. **Layering Lua or Other Scripting Hosts on Top**: Choosing a C ABI does not prevent scripting. Because `GridLockHostApi` is a self-contained C contract, a lightweight scripting runtime (such as PUC-Rio Lua or LuaJIT packaged as an optional `libgridlock_lua_host.so` plugin installed via `plugins.toml`) can layer cleanly on top as an external C-ABI plugin without bloating GridLock's core binary.
+
+---
+
 ## 1. System Architecture & Module Ownership
 
 GridLock isolates dynamically loaded C99/C++23 shared libraries behind a zero-Qt C99 function-pointer table (`GridLockHostApi` in [`include/gridlock/plugin_api.h`](../include/gridlock/plugin_api.h)). Every loaded plugin receives a private `GridLockHostApi` copy whose `host_ctx` points to a dedicated `PluginBindingContext`, enabling `PluginHostBridge` to attribute every allocation, action, menu, status badge, breakpoint, annotation, and report panel to its owning plugin and purge them deterministically prior to `QLibrary::unload()`.
